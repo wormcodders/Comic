@@ -1,0 +1,357 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Users - ComicVault Admin{% endblock %}
+
+{% block extra_css %}
+<style>
+.user-row {
+    transition: all 0.2s;
+}
+.user-row:hover {
+    background-color: #f8f9fa;
+}
+.user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+.stats-badge {
+    font-size: 0.8rem;
+}
+.role-badge {
+    font-size: 0.75rem;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-5">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5 fw-bold">
+                        <i class="fas fa-users me-2 text-primary"></i>Manage Users
+                    </h1>
+                    <p class="text-muted">View user accounts and manage permissions</p>
+                </div>
+                <div>
+                    <button class="btn btn-primary" onclick="showAddUserModal()">
+                        <i class="fas fa-user-plus me-2"></i>Add User
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <form method="GET" class="row g-3">
+                        <div class="col-md-4">
+                            <div class="input-group">
+                                <span class="input-group-text">
+                                    <i class="fas fa-search"></i>
+                                </span>
+                                <input type="text" class="form-control" name="search" 
+                                       placeholder="Search users..." value="{{ request.args.get('search', '') }}">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="role">
+                                <option value="">All Roles</option>
+                                <option value="admin" {% if request.args.get('role') == 'admin' %}selected{% endif %}>
+                                    Admin
+                                </option>
+                                <option value="user" {% if request.args.get('role') == 'user' %}selected{% endif %}>
+                                    User
+                                </option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="status">
+                                <option value="">All Status</option>
+                                <option value="active" {% if request.args.get('status') == 'active' %}selected{% endif %}>
+                                    Active
+                                </option>
+                                <option value="inactive" {% if request.args.get('status') == 'inactive' %}selected{% endif %}>
+                                    Inactive
+                                </option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-outline-primary w-100">
+                                <i class="fas fa-filter me-2"></i>Filter
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-dark text-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-list me-2"></i>User Accounts
+                            <span class="badge bg-light text-dark ms-2">{{ users|length }} users</span>
+                        </h5>
+                        <div>
+                            <button class="btn btn-sm btn-light" onclick="exportUsers()">
+                                <i class="fas fa-download me-1"></i>Export
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    {% if users %}
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>User</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Stats</th>
+                                    <th>Last Active</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for user in users %}
+                                <tr class="user-row">
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <img src="https://ui-avatars.com/api/?name={{ user.username }}&background=random" 
+                                                 alt="{{ user.username }}" class="user-avatar me-3">
+                                            <div>
+                                                <strong>{{ user.username }}</strong>
+                                                <br>
+                                                <small class="text-muted">ID: {{ user.id }}</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div>
+                                            {{ user.email }}
+                                            {% if user.email_verified %}
+                                            <i class="fas fa-check-circle text-success ms-1" title="Verified"></i>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge role-badge {% if user.role == 'admin' %}bg-danger{% else %}bg-primary{% endif %}">
+                                            {{ user.role.title() }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div class="d-flex flex-column">
+                                            <span class="stats-badge">
+                                                <i class="fas fa-book text-info me-1"></i>{{ user.comics_read or 0 }}
+                                            </span>
+                                            <span class="stats-badge">
+                                                <i class="fas fa-star text-warning me-1"></i>{{ user.ratings_given or 0 }}
+                                            </span>
+                                            <span class="stats-badge">
+                                                <i class="fas fa-bookmark text-success me-1"></i>{{ user.favorites or 0 }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        {% if user.last_login %}
+                                        <div>
+                                            <strong>{{ user.last_login.strftime('%Y-%m-%d') }}</strong>
+                                            <br>
+                                            <small class="text-muted">{{ user.last_login.strftime('%H:%M') }}</small>
+                                        </div>
+                                        {% else %}
+                                        <span class="text-muted">Never</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if user.is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <button class="btn btn-sm btn-info" 
+                                                    onclick="viewUser({{ user.id }})" title="View Profile">
+                                                <i class="fas fa-user"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-warning" 
+                                                    onclick="editUser({{ user.id }})" title="Edit User">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            {% if user.id != current_user.id %}
+                                            <button class="btn btn-sm {% if user.is_active %}btn-secondary{% else %}btn-success{% endif %}" 
+                                                    onclick="toggleUserStatus({{ user.id }})" 
+                                                    title="{% if user.is_active %}Deactivate{% else %}Activate{% endif %}">
+                                                <i class="fas fa-{% if user.is_active %}ban{% else %}check{% endif %}"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-danger" 
+                                                    onclick="deleteUser({{ user.id }})" title="Delete User">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                        <h5>No users found</h5>
+                        <p class="text-muted">Try adjusting your search criteria.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add User Modal -->
+<div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-user-plus me-2"></i>Add New User
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addUserForm">
+                    <div class="mb-3">
+                        <label for="newUsername" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="newUsername" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="newEmail" class="form-label">Email</label>
+                        <input type="email" class="form-control" id="newEmail" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="newPassword" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="newPassword" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="newRole" class="form-label">Role</label>
+                        <select class="form-select" id="newRole">
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addUser()">Add User</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// User management functions
+function showAddUserModal() {
+    const modal = new bootstrap.Modal(document.getElementById('addUserModal'));
+    modal.show();
+}
+
+function addUser() {
+    const form = document.getElementById('addUserForm');
+    if (form.checkValidity()) {
+        // Implement user creation
+        console.log('Add user:', {
+            username: document.getElementById('newUsername').value,
+            email: document.getElementById('newEmail').value,
+            password: document.getElementById('newPassword').value,
+            role: document.getElementById('newRole').value
+        });
+        
+        // Close modal and refresh
+        bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();
+        location.reload();
+    }
+}
+
+function viewUser(userId) {
+    // Navigate to user profile or show user details modal
+    console.log('View user:', userId);
+}
+
+function editUser(userId) {
+    // Implement user editing modal
+    console.log('Edit user:', userId);
+}
+
+function toggleUserStatus(userId) {
+    if (confirm('Are you sure you want to toggle this user\'s status?')) {
+        // Implement status toggle
+        console.log('Toggle user status:', userId);
+        location.reload();
+    }
+}
+
+function deleteUser(userId) {
+    if (confirm('Are you sure you want to delete this user? This action cannot be undone.\n\nAll associated data including ratings and reading progress will be permanently removed.')) {
+        // Implement user deletion
+        console.log('Delete user:', userId);
+        location.reload();
+    }
+}
+
+function exportUsers() {
+    // Implement user export functionality
+    console.log('Export users');
+    
+    // Example: CSV export
+    const users = [
+        ['Username', 'Email', 'Role', 'Status', 'Last Active'],
+        // Add user data here
+    ];
+    
+    // Create and download CSV
+    const csv = users.map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'users_export.csv';
+    a.click();
+}
+
+// Search functionality
+document.querySelector('input[name="search"]').addEventListener('input', function(e) {
+    if (e.target.value.length === 0) {
+        // Auto-submit when clearing search
+        e.target.form.submit();
+    }
+});
+
+// Initialize tooltips
+document.addEventListener('DOMContentLoaded', function() {
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+</script>
+{% endblock %}

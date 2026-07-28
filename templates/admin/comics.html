@@ -1,0 +1,173 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Manage Comics - Admin - ComicVault{% endblock %}
+
+{% block admin_content %}
+<div class="admin-header">
+    <h1><i class="fas fa-book me-2"></i>Manage Comics</h1>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('main.admin_bulk_upload') }}" class="btn btn-success">
+            <i class="fas fa-layer-group me-2"></i>Bulk Upload (PDF)
+        </a>
+        <a href="{{ url_for('main.admin_comic_create') }}" class="btn btn-primary">
+            <i class="fas fa-plus me-2"></i>Add Comic
+        </a>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="admin-table mb-4">
+    <div class="p-3">
+        <form method="GET" class="row g-3">
+            <div class="col-md-4">
+                <input type="text" class="form-control" name="search" placeholder="Search comics..." 
+                       value="{{ request.args.get('search', '') }}">
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" name="visibility">
+                    <option value="">All Visibility</option>
+                    <option value="public" {% if request.args.get('visibility') == 'public' %}selected{% endif %}>Public</option>
+                    <option value="private" {% if request.args.get('visibility') == 'private' %}selected{% endif %}>Private</option>
+                    <option value="draft" {% if request.args.get('visibility') == 'draft' %}selected{% endif %}>Draft</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" name="category">
+                    <option value="">All Categories</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat.id }}" {% if request.args.get('category')|int == cat.id %}selected{% endif %}>{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-secondary w-100">Filter</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Comics Table -->
+<div class="admin-table">
+    <div class="admin-table-header">
+        <h3 class="admin-table-title">All Comics ({{ comics.total }})</h3>
+        <span class="text-muted">Page {{ comics.page }} of {{ comics.pages }}</span>
+    </div>
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Comic</th>
+                    <th>Author</th>
+                    <th>Categories</th>
+                    <th>Status</th>
+                    <th>Views</th>
+                    <th>Episode</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for comic in comics.items %}
+                <tr>
+                    <td>
+                        <div class="d-flex align-items-center gap-3">
+                            {% if comic.cover_url %}
+                                <img src="{{ comic.cover_url }}" alt="" style="width: 45px; height: 60px; object-fit: cover; border-radius: 6px;">
+                            {% else %}
+                                <div style="width: 45px; height: 60px; background: var(--dark-bg); border-radius: 6px; display: flex; align-items: center; justify-content: center;">
+                                    <i class="fas fa-image text-muted"></i>
+                                </div>
+                            {% endif %}
+                            <div>
+                                <a href="{{ url_for('main.admin_comic_edit', id=comic.id) }}" class="fw-500 text-decoration-none">{{ comic.title }}</a>
+                                <div class="text-muted small">{{ comic.slug }}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>{{ comic.author or 'Unknown' }}</td>
+                    <td>
+                        <span class="badge bg-primary">{{ comic.category }}</span>
+                    </td>
+                    <td>
+                        {% if comic.visibility == 'draft' %}
+                            <span class="badge bg-warning text-dark">
+                                <i class="fas fa-edit me-1"></i>Draft
+                            </span>
+                        {% elif comic.visibility == 'private' %}
+                            <span class="badge bg-secondary">
+                                <i class="fas fa-lock me-1"></i>Private
+                            </span>
+                        {% else %}
+                            <span class="badge bg-success">
+                                <i class="fas fa-check-circle me-1"></i>Public
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td>{{ comic.view_count or 0 }}</td>
+                    <td>{{ comic.episode or '-' }}</td>
+                    <td>
+                        <div class="table-actions">
+                            <a href="{{ url_for('main.admin_comic_edit', id=comic.id) }}" class="btn btn-sm btn-outline-primary" title="Edit">
+                                <i class="fas fa-edit"></i>
+                            </a>
+                            <a href="{{ url_for('main.admin_chapters', comic_id=comic.id) }}" class="btn btn-sm btn-outline-secondary" title="Chapters">
+                                <i class="fas fa-list"></i>
+                            </a>
+                            <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}" target="_blank" class="btn btn-sm btn-outline-info" title="View">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                            <form method="POST" action="{{ url_for('main.admin_comic_delete', id=comic.id) }}" class="d-inline" onsubmit="return confirm('Are you sure? This will also delete all chapters.')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center py-4">
+                        <i class="fas fa-book-open text-muted fa-2x mb-2"></i>
+                        <p class="text-muted mb-0">No comics found. <a href="{{ url_for('main.admin_comic_create') }}">Add your first comic</a></p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <!-- Pagination -->
+    {% if pagination.pages > 1 %}
+    <div class="admin-table-footer">
+        <nav>
+            <ul class="pagination mb-0">
+                {% if pagination.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('main.admin_comics', page=pagination.prev_num, search=request.args.get('search', ''), visibility=request.args.get('visibility', ''), category=request.args.get('category', '')) }}">
+                        <i class="fas fa-chevron-left"></i>
+                    </a>
+                </li>
+                {% endif %}
+                
+                {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if p %}
+                        <li class="page-item {{ 'active' if p == pagination.page else '' }}">
+                            <a class="page-link" href="{{ url_for('main.admin_comics', page=p, search=request.args.get('search', ''), visibility=request.args.get('visibility', ''), category=request.args.get('category', '')) }}">{{ p }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if pagination.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('main.admin_comics', page=pagination.next_num, search=request.args.get('search', ''), visibility=request.args.get('visibility', ''), category=request.args.get('category', '')) }}">
+                        <i class="fas fa-chevron-right"></i>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

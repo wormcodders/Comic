@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Notifications</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body style="padding: 50px; font-family: Arial, sans-serif;">
+    <h1>Notification Test Page</h1>
+    <p>Click the buttons below to test the auto-dismissing notifications (2 seconds):</p>
+    
+    <button onclick="showSuccess('This is a success message!')" style="padding: 10px 20px; margin: 10px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer;">Test Success</button>
+    
+    <button onclick="showError('This is an error message!')" style="padding: 10px 20px; margin: 10px; background: #ef4444; color: white; border: none; border-radius: 5px; cursor: pointer;">Test Error</button>
+    
+    <button onclick="showWarning('This is a warning message!')" style="padding: 10px 20px; margin: 10px; background: #f59e0b; color: white; border: none; border-radius: 5px; cursor: pointer;">Test Warning</button>
+    
+    <button onclick="showInfo('This is an info message!')" style="padding: 10px 20px; margin: 10px; background: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer;">Test Info</button>
+    
+    <p style="margin-top: 30px; color: #666;">
+        <strong>Expected behavior:</strong> Each notification should automatically disappear after 2 seconds.<br>
+        Success, Warning, and Info notifications last 2 seconds.<br>
+        Error notifications last 4 seconds (longer to ensure users see them).
+    </p>
+    
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

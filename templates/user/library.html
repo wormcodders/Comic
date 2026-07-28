@@ -1,0 +1,648 @@
+{% extends "base.html" %}
+
+{% block title %}My Library - ComicVault{% endblock %}
+
+{% block extra_css %}
+<style>
+.library-header {
+    background: linear-gradient(135deg, rgba(255, 107, 53, 0.2) 0%, rgba(123, 44, 191, 0.2) 100%);
+    backdrop-filter: var(--blur-lg);
+    -webkit-backdrop-filter: var(--blur-lg);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 1.5rem;
+    padding: 2.5rem 2rem;
+    color: white;
+    margin-bottom: 2rem;
+    box-shadow: var(--glass-shadow-lg);
+}
+
+.library-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.stat-card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 1.2rem;
+    border-radius: 1rem;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+}
+
+.stat-card .number {
+    font-size: 2rem;
+    font-weight: bold;
+    display: block;
+    color: white;
+}
+
+.stat-card .label {
+    font-size: 0.9rem;
+    opacity: 0.8;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.filter-tabs {
+    display: flex;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 2rem;
+    overflow-x: auto;
+}
+
+.filter-tab {
+    padding: 1rem 1.5rem;
+    border: none;
+    background: none;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    white-space: nowrap;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.filter-tab:hover {
+    color: white;
+}
+
+.filter-tab.active {
+    color: var(--primary-color);
+}
+
+.filter-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--primary-color);
+}
+
+.library-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1.5rem;
+}
+
+.library-item {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+    backdrop-filter: var(--blur-md);
+    -webkit-backdrop-filter: var(--blur-md);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    overflow: hidden;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+    color: white;
+}
+
+.library-item:hover {
+    transform: translateY(-8px) scale(1.02);
+    border-color: rgba(255, 255, 255, 0.25);
+    box-shadow: 
+        0 20px 40px rgba(31, 38, 135, 0.25),
+        0 0 30px rgba(255, 107, 53, 0.2);
+}
+
+.library-item .cover {
+    position: relative;
+    padding-bottom: 150%;
+    overflow: hidden;
+    background: var(--darker-bg);
+}
+
+.library-item .cover img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.4s ease;
+}
+
+.library-item:hover .cover img {
+    transform: scale(1.05);
+}
+
+.library-item .cover .reading-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.library-item .cover .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+    box-shadow: 0 0 8px var(--primary-color);
+    transition: width 0.3s ease;
+}
+
+.library-item .cover .status-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 0.25rem 0.75rem;
+    border-radius: 1rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.status-badge.reading {
+    background: rgba(34, 197, 94, 0.2);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    color: #22C55E;
+}
+
+.status-badge.completed {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: #3B82F6;
+}
+
+.status-badge.paused {
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #F59E0B;
+}
+
+.library-item .info {
+    padding: 1rem;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.6) 100%);
+}
+
+.library-item .title {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: white;
+}
+
+.library-item .meta {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 0.5rem;
+}
+
+.library-item .progress-text {
+    font-size: 0.8rem;
+    color: var(--primary-color);
+    font-weight: 500;
+}
+
+.sort-dropdown {
+    position: relative;
+}
+
+.sort-dropdown .dropdown-toggle {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: white;
+    padding: 0.5rem 1.2rem;
+    border-radius: 0.5rem;
+    transition: all 0.3s ease;
+}
+
+.sort-dropdown .dropdown-toggle:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.empty-library {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.empty-library .icon {
+    font-size: 4rem;
+    color: rgba(255, 255, 255, 0.15);
+    margin-bottom: 1rem;
+}
+
+.view-toggle {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.view-toggle button {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.7);
+    border-radius: 0.25rem;
+    transition: all 0.3s ease;
+}
+
+.view-toggle button:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
+}
+
+.view-toggle button.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.list-view .library-item {
+    display: flex;
+    align-items: center;
+    padding: 1rem;
+}
+
+.list-view .library-item .cover {
+    width: 60px;
+    height: 80px;
+    padding-bottom: 0;
+    margin-right: 1rem;
+    flex-shrink: 0;
+}
+
+.list-view .library-item .cover img {
+    border-radius: 0.25rem;
+}
+
+.list-view .library-item .info {
+    flex: 1;
+    background: transparent;
+    padding: 0;
+}
+
+.pagination {
+    justify-content: center;
+    margin-top: 3rem;
+}
+
+.page-link {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: white;
+}
+
+.page-link:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.page-item.active .page-link {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+@media (max-width: 768px) {
+    .library-header {
+        padding: 1.5rem;
+    }
+    
+    .library-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .library-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 1rem;
+    }
+    
+    .filter-tabs {
+        margin-bottom: 1rem;
+    }
+    
+    .filter-tab {
+        padding: 0.75rem 1rem;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+    <!-- Library Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="library-header">
+                <h1 class="display-5 fw-bold mb-3">My Library</h1>
+                <p class="mb-0 opacity-80">Your personal comic collection and reading history</p>
+                
+                <div class="library-stats">
+                    <div class="stat-card">
+                        <span class="number" id="stat-total">{{ stats.total_comics or 0 }}</span>
+                        <span class="label">Total Comics</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="number" id="stat-reading">{{ stats.currently_reading or 0 }}</span>
+                        <span class="label">Currently Reading</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="number" id="stat-completed">{{ stats.completed or 0 }}</span>
+                        <span class="label">Completed</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="number" id="stat-hours">{{ stats.total_hours or 0.0 }}</span>
+                        <span class="label">Hours Read</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters and Controls -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <!-- Filter Tabs -->
+                <div class="filter-tabs">
+                    <button class="filter-tab active" onclick="filterLibrary('all')">
+                        All Comics
+                    </button>
+                    <button class="filter-tab" onclick="filterLibrary('reading')">
+                        Currently Reading
+                    </button>
+                    <button class="filter-tab" onclick="filterLibrary('completed')">
+                        Completed
+                    </button>
+                    <button class="filter-tab" onclick="filterLibrary('favorites')">
+                        Favorites
+                    </button>
+                </div>
+
+                <!-- Controls -->
+                <div class="d-flex gap-3 align-items-center">
+                    <!-- View Toggle -->
+                    <div class="view-toggle">
+                        <button class="active" onclick="setView('grid')" title="Grid View" aria-label="Grid view">
+                            <i class="fas fa-th"></i>
+                        </button>
+                        <button onclick="setView('list')" title="List View" aria-label="List view">
+                            <i class="fas fa-list"></i>
+                        </button>
+                    </div>
+
+                    <!-- Sort Dropdown -->
+                    <div class="sort-dropdown">
+                        <button class="dropdown-toggle" data-bs-toggle="dropdown">
+                            <i class="fas fa-sort"></i> Sort
+                        </button>
+                        <ul class="dropdown-menu glass-dropdown">
+                            <li><a class="dropdown-item glass-dropdown-item" href="#" onclick="sortLibrary('title')">Title</a></li>
+                            <li><a class="dropdown-item glass-dropdown-item" href="#" onclick="sortLibrary('author')">Author</a></li>
+                            <li><a class="dropdown-item glass-dropdown-item" href="#" onclick="sortLibrary('progress')">Progress</a></li>
+                            <li><a class="dropdown-item glass-dropdown-item" href="#" onclick="sortLibrary('recent')">Recently Read</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Library Grid -->
+    <div class="row" id="libraryContent">
+        <div class="col-12">
+            <div class="library-grid" id="libraryGrid" style="{% if not comics %}display: none;{% endif %}">
+                {% for comic in comics %}
+                    {% set progress = comic.reading_progress.filter_by(user_id=current_user.id).first() %}
+                    {% if progress %}
+                        {% set percent = progress.percent_complete|int %}
+                        {% if progress.completed %}
+                            {% set status = "completed" %}
+                            {% set status_text = "Completed" %}
+                        {% else %}
+                            {% set status = "reading" %}
+                            {% set status_text = "Reading" %}
+                        {% endif %}
+                    {% else %}
+                        {% set percent = 0 %}
+                        {% set status = "reading" %}
+                        {% set status_text = "Not Started" %}
+                    {% endif %}
+                    
+                    <div class="library-item" data-status="{{ status }}" onclick="window.location.href='{{ url_for('main.comic_detail', comic_id=comic.id) }}'">
+                        <div class="cover">
+                            {% if comic.cover_url %}
+                                <img class="lazy-image" data-src="{{ comic.cover_url }}" alt="{{ comic.title }}" loading="lazy">
+                            {% else %}
+                                <div class="placeholder-cover">
+                                    <i class="fas fa-image"></i>
+                                </div>
+                            {% endif %}
+                            <div class="reading-progress">
+                                <div class="progress-fill" style="width: {{ percent }}%;"></div>
+                            </div>
+                            <div class="status-badge {{ status }}">{{ status_text }}</div>
+                        </div>
+                        <div class="info">
+                            <div class="title">{{ comic.title }}</div>
+                            <div class="meta">{{ comic.author or 'Unknown' }}</div>
+                            <div class="progress-text">{{ percent }}% Complete</div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <!-- Empty State -->
+            <div class="empty-library" id="emptyState" style="{% if comics %}display: none;{% else %}display: block;{% endif %}">
+                <div class="icon">
+                    <i class="fas fa-book-open"></i>
+                </div>
+                <h3 style="color: white;">No comics found</h3>
+                <p class="text-muted">Start building your library by exploring our collection or uploading your own comics.</p>
+                <div class="mt-3">
+                    <a href="/" class="glass-btn me-2">
+                        <i class="fas fa-compass"></i> Explore
+                    </a>
+                    {% if current_user.is_admin %}
+                    <a href="{{ url_for('main.admin_comic_create') }}" class="glass-btn glass-btn-secondary">
+                        <i class="fas fa-plus"></i> Upload Comics
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Pagination -->
+            {% if pagination and pagination.pages > 1 %}
+            <nav class="pagination">
+                <ul class="pagination">
+                    {% if pagination.has_prev %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('main.library', page=pagination.prev_num) }}">
+                            <i class="fas fa-chevron-left"></i> Previous
+                        </a>
+                    </li>
+                    {% endif %}
+                    
+                    {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                        {% if p %}
+                            <li class="page-item {{ 'active' if p == pagination.page else '' }}">
+                                <a class="page-link" href="{{ url_for('main.library', page=p) }}">{{ p }}</a>
+                            </li>
+                        {% else %}
+                            <li class="page-item disabled">
+                                <span class="page-link">...</span>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+                    
+                    {% if pagination.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('main.library', page=pagination.next_num) }}">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentFilter = 'all';
+let currentSort = 'title';
+let currentView = 'grid';
+
+function filterLibrary(filter) {
+    currentFilter = filter;
+    
+    // Update active tab
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    event.target.classList.add('active');
+    
+    // Filter items
+    const items = document.querySelectorAll('.library-item');
+    let visibleCount = 0;
+    
+    items.forEach(item => {
+        const status = item.dataset.status;
+        
+        if (filter === 'all') {
+            item.style.display = '';
+            visibleCount++;
+        } else if (filter === 'favorites') {
+            // All library items are favorited
+            item.style.display = '';
+            visibleCount++;
+        } else if (status === filter) {
+            item.style.display = '';
+            visibleCount++;
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    // Show/hide empty state
+    const emptyState = document.getElementById('emptyState');
+    const grid = document.getElementById('libraryGrid');
+    
+    if (visibleCount === 0) {
+        emptyState.style.display = 'block';
+        grid.style.display = 'none';
+    } else {
+        emptyState.style.display = 'none';
+        grid.style.display = '';
+    }
+}
+
+function sortLibrary(sortBy) {
+    currentSort = sortBy;
+    
+    const grid = document.getElementById('libraryGrid');
+    const items = Array.from(grid.querySelectorAll('.library-item'));
+    
+    items.sort((a, b) => {
+        switch(sortBy) {
+            case 'title':
+                const titleA = a.querySelector('.title').textContent;
+                const titleB = b.querySelector('.title').textContent;
+                return titleA.localeCompare(titleB);
+                
+            case 'author':
+                const authorA = a.querySelector('.meta').textContent;
+                const authorB = b.querySelector('.meta').textContent;
+                return authorA.localeCompare(authorB);
+                
+            case 'progress':
+                const progressA = parseInt(a.querySelector('.progress-fill').style.width) || 0;
+                const progressB = parseInt(b.querySelector('.progress-fill').style.width) || 0;
+                return progressB - progressA; // Descending order
+                
+            case 'recent':
+                return Math.random() - 0.5;
+                
+            default:
+                return 0;
+        }
+    });
+    
+    // Re-append sorted items
+    items.forEach(item => grid.appendChild(item));
+}
+
+function setView(view) {
+    currentView = view;
+    
+    // Update active button
+    document.querySelectorAll('.view-toggle button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    event.target.classList.add('active');
+    
+    // Switch view
+    const grid = document.getElementById('libraryGrid');
+    if (view === 'list') {
+        grid.classList.add('list-view');
+    } else {
+        grid.classList.remove('list-view');
+    }
+}
+
+// Initialize tooltips
+document.addEventListener('DOMContentLoaded', function() {
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    const tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    // Number keys to switch filters
+    if (e.key >= '1' && e.key <= '4') {
+        const filterIndex = parseInt(e.key) - 1;
+        const tabs = document.querySelectorAll('.filter-tab');
+        if (tabs[filterIndex]) {
+            tabs[filterIndex].click();
+        }
+    }
+});
+</script>
+{% endblock %}

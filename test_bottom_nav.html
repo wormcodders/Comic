@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bottom Navigation Test</title>
+    <link rel="stylesheet" href="/static/css/bottom_nav.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            min-height: 200vh;
+        }
+        
+        .test-content {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        h1 {
+            color: #8b5cf6;
+            margin-bottom: 20px;
+        }
+        
+        .test-section {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .test-button {
+            background: #8b5cf6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        
+        .test-button:hover {
+            background: #7c3aed;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-content">
+        <h1>🧪 Bottom Navigation Test Page</h1>
+        
+        <div class="test-section">
+            <h2>Instructions</h2>
+            <p>1. <strong>On Mobile/Tablet:</strong> Swipe up on the handle at the bottom to open the navigation</p>
+            <p>2. <strong>On Desktop:</strong> Click or drag the handle to open</p>
+            <p>3. <strong>Keyboard:</strong> Press Tab to focus the handle, then Enter/Space to toggle</p>
+            <p>4. <strong>Escape:</strong> Press Escape to close the navigation</p>
+        </div>
+        
+        <div class="test-section">
+            <h2>Features Tested</h2>
+            <ul>
+                <li>✅ Swipe gestures (touch)</li>
+                <li>✅ Mouse drag (desktop)</li>
+                <li>✅ Click to toggle</li>
+                <li>✅ Keyboard navigation</li>
+                <li>✅ Escape key to close</li>
+                <li>✅ Overlay click to close</li>
+                <li>✅ Smooth animations (60fps)</li>
+                <li>✅ Glass morphism styling</li>
+                <li>✅ Responsive breakpoints</li>
+            </ul>
+        </div>
+        
+        <div class="test-section">
+            <h2>Debug Controls</h2>
+            <button class="test-button" onclick="window.bottomNavController.open()">Open Nav</button>
+            <button class="test-button" onclick="window.bottomNavController.close()">Close Nav</button>
+            <button class="test-button" onclick="window.bottomNavController.toggle()">Toggle Nav</button>
+        </div>
+        
+        <div class="test-section">
+            <h2>Event Listeners</h2>
+            <p>Check the browser console for events:</p>
+            <ul>
+                <li><code>bottomnav:open</code> - When navigation opens</li>
+                <li><code>bottomnav:close</code> - When navigation closes</li>
+            </ul>
+        </div>
+        
+        <div style="height: 100vh; display: flex; align-items: center; justify-content: center; opacity: 0.5;">
+            <p>Scroll down to test with content...</p>
+        </div>
+    </div>
+    
+    <!-- Test Bottom Sheet -->
+    <div id="bottom-sheet-overlay" class="bottom-sheet-overlay"></div>
+    
+    <nav id="bottom-sheet" class="bottom-sheet">
+        <div id="bottom-sheet-handle" class="bottom-sheet-handle" role="button" tabindex="0" aria-label="Toggle navigation">
+            <span class="visually-hidden">Drag to open or close navigation</span>
+        </div>
+        
+        <div id="bottom-sheet-content" class="bottom-sheet-content">
+            <div class="bottom-nav-grid">
+                <a href="#" class="bottom-nav-item active" data-action="home">
+                    <span class="bottom-nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                            <polyline points="9 22 9 12 15 12 15 22"/>
+                        </svg>
+                    </span>
+                    <span class="bottom-nav-label">Home</span>
+                </a>
+                
+                <a href="#" class="bottom-nav-item" data-action="library">
+                    <span class="bottom-nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                        </svg>
+                    </span>
+                    <span class="bottom-nav-label">Library</span>
+                </a>
+                
+                <a href="#" class="bottom-nav-item" data-action="search">
+                    <span class="bottom-nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                    </span>
+                    <span class="bottom-nav-label">Search</span>
+                </a>
+                
+                <a href="#" class="bottom-nav-item" data-action="profile">
+                    <span class="bottom-nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                    </span>
+                    <span class="bottom-nav-label">Profile</span>
+                </a>
+            </div>
+            
+            <div class="bottom-sheet-collapsed">
+                <a href="#" class="bottom-nav-item active">
+                    <span class="bottom-nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                            <polyline points="9 22 9 12 15 12 15 22"/>
+                        </svg>
+                    </span>
+                    <span class="bottom-nav-label">Home</span>
+                </a>
+                <a href="#" class="bottom-nav-item">
+                    <span class="bottom-nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                        </svg>
+                    </span>
+                    <span class="bottom-nav-label">Library</span>
+                </a>
+                <a href="#" class="bottom-nav-item">
+                    <span class="bottom-nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                    </span>
+                    <span class="bottom-nav-label">Search</span>
+                </a>
+                <a href="#" class="bottom-nav-item">
+                    <span class="bottom-nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                    </span>
+                    <span class="bottom-nav-label">Profile</span>
+                </a>
+            </div>
+        </div>
+    </nav>
+    
+    <script src="/static/js/bottom_nav.js"></script>
+    <script>
+        // Event listeners for debugging
+        document.addEventListener('bottomnav:open', () => {
+            console.log('✅ Event: bottomnav:open');
+        });
+        
+        document.addEventListener('bottomnav:close', () => {
+            console.log('✅ Event: bottomnav:close');
+        });
+        
+        // Log initialization
+        console.log('🧪 Bottom Navigation Test Page Loaded');
+        console.log('📱 Swipe up on the handle to test navigation');
+        console.log('💻 Click or drag the handle on desktop');
+    </script>
+</body>
+</html>

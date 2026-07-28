@@ -1,0 +1,219 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Dashboard - Admin - ComicVault{% endblock %}
+
+{% block admin_content %}
+<div class="admin-header">
+    <h1><i class="fas fa-chart-line me-2"></i>Dashboard</h1>
+    <a href="{{ url_for('main.admin_comic_create') }}" class="btn btn-primary">
+        <i class="fas fa-plus me-2"></i>Add Comic
+    </a>
+</div>
+
+<!-- Stats Grid -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon blue">
+            <i class="fas fa-book"></i>
+        </div>
+        <div class="stat-info">
+            <h3>{{ stats.total_comics }}</h3>
+            <p>Total Comics</p>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon green">
+            <i class="fas fa-users"></i>
+        </div>
+        <div class="stat-info">
+            <h3>{{ stats.total_users }}</h3>
+            <p>Total Users</p>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon purple">
+            <i class="fas fa-eye"></i>
+        </div>
+        <div class="stat-info">
+            <h3>{{ stats.total_views }}</h3>
+            <p>Total Views</p>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon orange">
+            <i class="fas fa-star"></i>
+        </div>
+        <div class="stat-info">
+            <h3>{{ "%.1f"|format(stats.avg_rating) }}</h3>
+            <p>Avg. Rating</p>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Recent Comics -->
+    <div class="col-lg-8">
+        <div class="admin-table">
+            <div class="admin-table-header">
+                <h3 class="admin-table-title"><i class="fas fa-book me-2"></i>Recent Comics</h3>
+                <a href="{{ url_for('main.admin_comics') }}" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Author</th>
+                            <th>Status</th>
+                            <th>Views</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for comic in recent_comics %}
+                        <tr>
+                            <td>
+                                <div class="d-flex align-items-center gap-2">
+                                    {% if comic.cover_url %}
+                                        <img src="{{ comic.cover_url }}" alt="" style="width: 40px; height: 55px; object-fit: cover; border-radius: 4px;">
+                                    {% else %}
+                                        <div style="width: 40px; height: 55px; background: var(--dark-bg); border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+                                            <i class="fas fa-image text-muted"></i>
+                                        </div>
+                                    {% endif %}
+                                    <div>
+                                        <div class="fw-500">{{ comic.title }}</div>
+                                        <small class="text-muted">{{ comic.chapters.count() }} chapters</small>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>{{ comic.author or 'Unknown' }}</td>
+                            <td>
+                                <span class="badge {{ 'badge-active' if comic.visibility == 'public' else 'badge-inactive' }}">
+                                    {{ comic.visibility }}
+                                </span>
+                            </td>
+                            <td>{{ comic.view_count }}</td>
+                            <td>
+                                <div class="table-actions">
+                                    <a href="{{ url_for('main.admin_comic_edit', id=comic.id) }}" class="btn-action edit">
+                                        <i class="fas fa-edit"></i>
+                                    </a>
+                                    <form action="{{ url_for('main.admin_comic_delete', id=comic.id) }}" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                        <button type="submit" class="btn-action delete">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Recent Users -->
+    <div class="col-lg-4">
+        <div class="admin-table">
+            <div class="admin-table-header">
+                <h3 class="admin-table-title"><i class="fas fa-users me-2"></i>Recent Users</h3>
+                <a href="{{ url_for('main.admin_users') }}" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Joined</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in recent_users %}
+                        <tr>
+                            <td>
+                                <div class="user-info">
+                                    <div class="user-avatar">{{ user.username[0]|upper }}</div>
+                                    <div>
+                                        <div class="user-name">{{ user.username }}</div>
+                                        <div class="user-email">{{ user.email }}</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge {{ 'badge-active' if user.is_admin else 'badge-inactive' }}">
+                                    {{ 'Admin' if user.is_admin else 'User' }}
+                                </span>
+                            </td>
+                            <td>{{ user.created_at.strftime('%b %d') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="admin-table mt-4">
+    <div class="admin-table-header">
+        <h3 class="admin-table-title"><i class="fas fa-bolt me-2"></i>Quick Actions</h3>
+    </div>
+    <div class="p-4">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <a href="{{ url_for('main.admin_comic_create') }}" class="quick-action-card">
+                    <i class="fas fa-plus-circle"></i>
+                    <span>Add Comic</span>
+                </a>
+            </div>
+            <div class="col-md-3">
+                <a href="{{ url_for('main.admin_category_create') }}" class="quick-action-card">
+                    <i class="fas fa-folder-plus"></i>
+                    <span>Add Category</span>
+                </a>
+            </div>
+            <div class="col-md-3">
+                <a href="{{ url_for('main.admin_users') }}" class="quick-action-card">
+                    <i class="fas fa-user-plus"></i>
+                    <span>Manage Users</span>
+                </a>
+            </div>
+            <div class="col-md-3">
+                <a href="{{ url_for('main.admin_settings') }}" class="quick-action-card">
+                    <i class="fas fa-cog"></i>
+                    <span>Settings</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.quick-action-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.5rem;
+    background: var(--dark-bg);
+    border-radius: 12px;
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: all 0.2s;
+}
+
+.quick-action-card:hover {
+    background: var(--primary-color);
+    color: white;
+    transform: translateY(-2px);
+}
+
+.quick-action-card i {
+    font-size: 1.5rem;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,132 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Manage Users - Admin - ComicVault{% endblock %}
+
+{% block admin_content %}
+<div class="admin-header">
+    <h1><i class="fas fa-users me-2"></i>Manage Users</h1>
+</div>
+
+<!-- Filters -->
+<div class="admin-table mb-4">
+    <div class="p-3">
+        <form method="GET" class="row g-3">
+            <div class="col-md-4">
+                <input type="text" class="form-control" name="search" placeholder="Search users..." 
+                       value="{{ request.args.get('search', '') }}">
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" name="role">
+                    <option value="">All Roles</option>
+                    <option value="admin" {% if request.args.get('role') == 'admin' %}selected{% endif %}>Admin</option>
+                    <option value="user" {% if request.args.get('role') == 'user' %}selected{% endif %}>User</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-secondary w-100">Filter</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Users Table -->
+<div class="admin-table">
+    <div class="admin-table-header">
+        <h3 class="admin-table-title">All Users ({{ users.total }})</h3>
+        <span class="text-muted">Page {{ users.page }} of {{ users.pages }}</span>
+    </div>
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Joined</th>
+                    <th>Last Login</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users.items %}
+                <tr>
+                    <td>
+                        <div class="user-info">
+                            <div class="user-avatar">{{ user.username[0]|upper }}</div>
+                            <div>
+                                <div class="user-name">{{ user.username }}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>{{ user.email }}</td>
+                    <td>
+                        <span class="badge {{ 'badge-active' if user.is_admin else 'badge-inactive' }}">
+                            {{ 'Admin' if user.is_admin else 'User' }}
+                        </span>
+                    </td>
+                    <td>{{ user.created_at.strftime('%b %d, %Y') }}</td>
+                    <td>{{ user.last_login.strftime('%b %d, %Y') if user.last_login else 'Never' }}</td>
+                    <td>
+                        <div class="table-actions">
+                            <a href="{{ url_for('main.admin_user_edit', id=user.id) }}" class="btn btn-sm btn-outline-primary" title="Edit">
+                                <i class="fas fa-edit"></i>
+                            </a>
+                            {% if user.id != current_user.id %}
+                            <form method="POST" action="{{ url_for('main.admin_user_delete', id=user.id) }}" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this user?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="text-center py-4">
+                        <i class="fas fa-users text-muted fa-2x mb-2"></i>
+                        <p class="text-muted mb-0">No users found.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Pagination -->
+    {% if users.pages > 1 %}
+    <div class="admin-table-footer">
+        <nav>
+            <ul class="pagination mb-0">
+                {% if users.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('main.admin_users', page=users.prev_num) }}">
+                        <i class="fas fa-chevron-left"></i>
+                    </a>
+                </li>
+                {% endif %}
+                
+                {% for p in users.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if p %}
+                        <li class="page-item {{ 'active' if p == users.page else '' }}">
+                            <a class="page-link" href="{{ url_for('main.admin_users', page=p) }}">{{ p }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if users.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('main.admin_users', page=users.next_num) }}">
+                        <i class="fas fa-chevron-right"></i>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: comicvault_web
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=change-this-secret-key-in-production
+      - DATABASE_URL=sqlite:////app/instance/comics.db
+    volumes:
+      - comic_data:/app/instance
+      - comic_uploads:/app/static/uploads
+    restart: unless-stopped
+
+volumes:
+  comic_data:
+  comic_uploads:

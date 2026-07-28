@@ -1,0 +1,16 @@
+.git
+.gitignore
+__pycache__
+venv
+.venv
+env
+.env
+instance/
+static/uploads/
+*.db
+*.sqlite
+*.sqlite3
+debug.json
+.pytest_cache
+.vscode/
+.idea/

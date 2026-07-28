@@ -1,0 +1,8 @@
+# MiniCo Ignore
+*.env
+secrets.*
+__pycache__/
+.pytest_cache/
+node_modules/
+.git/
+*.pyc

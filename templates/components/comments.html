@@ -1,0 +1,539 @@
+<!-- Comments Section Component -->
+{% macro comments_section(comic_id) %}
+<div class="comments-section" id="comments-section">
+    <div class="comments-header">
+        <h3><i class="fas fa-comments"></i> Comments <span id="comments-count">(0)</span></h3>
+        <button class="btn btn-primary btn-sm" id="add-comment-btn" onclick="showCommentForm()">
+            <i class="fas fa-plus"></i> Add Comment
+        </button>
+    </div>
+    
+    <!-- Comment Form -->
+    <div class="comment-form-container" id="comment-form" style="display: none;">
+        <form onsubmit="return submitComment(event)">
+            <input type="hidden" name="parent_id" id="comment-parent-id" value="">
+            <div class="form-group">
+                <textarea id="comment-content" class="form-control" rows="3" 
+                    placeholder="Share your thoughts about this comic..." maxlength="1000" required></textarea>
+                <div class="char-count"><span id="char-count">0</span>/1000</div>
+            </div>
+            <div class="form-actions">
+                <label class="spoiler-toggle">
+                    <input type="checkbox" id="comment-spoiler">
+                    <span>Contains spoilers</span>
+                </label>
+                <div class="form-btns">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="hideCommentForm()">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Post Comment</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Comments List -->
+    <div class="comments-list" id="comments-list">
+        <div class="comments-loading">
+            <i class="fas fa-spinner fa-spin"></i> Loading comments...
+        </div>
+    </div>
+    
+    <!-- Load More -->
+    <div class="comments-load-more" id="comments-load-more" style="display: none;">
+        <button class="btn btn-secondary" onclick="loadMoreComments()">Load More Comments</button>
+    </div>
+</div>
+
+<style>
+.comments-section {
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.comments-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.comments-header h3 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.comment-form-container {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.comment-form-container textarea {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 8px;
+    resize: vertical;
+    min-height: 80px;
+}
+
+.comment-form-container textarea:focus {
+    border-color: var(--primary-color);
+    outline: none;
+}
+
+.char-count {
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 1rem;
+}
+
+.spoiler-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.spoiler-toggle input {
+    accent-color: var(--primary-color);
+}
+
+.form-btns {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.comments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.comment-card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 1rem;
+}
+
+.comment-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.comment-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: white;
+    flex-shrink: 0;
+}
+
+.comment-user-info {
+    flex: 1;
+}
+
+.comment-username {
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.comment-date {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.comment-spoiler-badge {
+    background: var(--warning-color);
+    color: #000;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.comment-content {
+    color: var(--text-color);
+    line-height: 1.6;
+    margin-bottom: 0.75rem;
+}
+
+.comment-content.spoiler {
+    background: var(--dark-bg);
+    padding: 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.comment-content.spoiler::after {
+    content: "Click to reveal spoiler";
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+}
+
+.comment-content.spoiler.hidden {
+    filter: blur(5px);
+    user-select: none;
+}
+
+.comment-actions {
+    display: flex;
+    gap: 1rem;
+}
+
+.comment-action {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: color 0.2s;
+}
+
+.comment-action:hover {
+    color: var(--primary-color);
+}
+
+.comment-action.liked {
+    color: var(--primary-color);
+}
+
+.comment-replies {
+    margin-top: 1rem;
+    margin-left: 2rem;
+    padding-left: 1rem;
+    border-left: 2px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.reply-btn {
+    background: none;
+    border: none;
+    color: var(--primary-color);
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 0.25rem 0;
+}
+
+.reply-btn:hover {
+    text-decoration: underline;
+}
+
+.comments-loading {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+
+.comments-empty {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+
+.comments-empty i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.3;
+}
+
+.comments-load-more {
+    text-align: center;
+    margin-top: 1.5rem;
+}
+
+@media (max-width: 768px) {
+    .comment-header {
+        flex-wrap: wrap;
+    }
+    
+    .form-actions {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .form-btns {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+</style>
+
+<script>
+// Comments state
+let commentsPage = 1;
+let commentsHasMore = false;
+
+// Initialize comments
+document.addEventListener('DOMContentLoaded', loadComments);
+
+function showCommentForm(parentId = null) {
+    const form = document.getElementById('comment-form');
+    const parentInput = document.getElementById('comment-parent-id');
+    form.style.display = 'block';
+    parentInput.value = parentId || '';
+    
+    if (parentId) {
+        document.querySelector('.comment-form-container h4')?.remove();
+        const h4 = document.createElement('h4');
+        h4.textContent = 'Reply to comment';
+        h4.style.marginBottom = '1rem';
+        form.querySelector('form').prepend(h4);
+    }
+    
+    document.getElementById('comment-content').focus();
+}
+
+function hideCommentForm() {
+    document.getElementById('comment-form').style.display = 'none';
+    document.getElementById('comment-content').value = '';
+    document.getElementById('comment-spoiler').checked = false;
+    document.getElementById('comment-parent-id').value = '';
+    document.querySelector('.comment-form-container h4')?.remove();
+}
+
+async function submitComment(event) {
+    event.preventDefault();
+    
+    const content = document.getElementById('comment-content').value.trim();
+    const isSpoiler = document.getElementById('comment-spoiler').checked;
+    const parentId = document.getElementById('comment-parent-id').value || null;
+    
+    if (!content) {
+        ComicVault.showToast('Please enter a comment', 'error');
+        return false;
+    }
+    
+    try {
+        const response = await fetch(`/api/comics/${window.COMIC_ID}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content,
+                is_spoiler: isSpoiler,
+                parent_id: parentId ? parseInt(parentId) : null
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            hideCommentForm();
+            ComicVault.showToast('Comment posted!', 'success');
+            
+            if (parentId) {
+                // Reload replies for the parent
+                loadReplies(parentId);
+            } else {
+                // Reload comments
+                commentsPage = 1;
+                loadComments();
+            }
+        } else {
+            ComicVault.showToast(data.message || 'Failed to post comment', 'error');
+        }
+    } catch (error) {
+        console.error('Comment error:', error);
+        ComicVault.showToast('Failed to post comment', 'error');
+    }
+    
+    return false;
+}
+
+async function loadComments() {
+    const container = document.getElementById('comments-list');
+    
+    try {
+        const response = await fetch(`/api/comics/${window.COMIC_ID}/comments?page=${commentsPage}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('comments-count').textContent = `(${data.total})`;
+            
+            if (data.comments.length === 0 && commentsPage === 1) {
+                container.innerHTML = `
+                    <div class="comments-empty">
+                        <i class="fas fa-comment-dots"></i>
+                        <p>No comments yet. Be the first to share your thoughts!</p>
+                    </div>
+                `;
+            } else {
+                if (commentsPage === 1) {
+                    container.innerHTML = '';
+                }
+                
+                data.comments.forEach(comment => {
+                    container.innerHTML += renderComment(comment);
+                });
+            }
+            
+            commentsHasMore = data.current_page < data.pages;
+            document.getElementById('comments-load-more').style.display = commentsHasMore ? 'block' : 'none';
+        }
+    } catch (error) {
+        console.error('Load comments error:', error);
+        container.innerHTML = '<div class="comments-loading">Failed to load comments</div>';
+    }
+}
+
+function renderComment(comment) {
+    const avatar = comment.user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(comment.user.username)}&background=8b5cf6&color=fff`;
+    const spoilerClass = comment.is_spoiler ? 'spoiler hidden' : '';
+    const spoilerBadge = comment.is_spoiler ? '<span class="comment-spoiler-badge">SPOILER</span>' : '';
+    
+    return `
+        <div class="comment-card" id="comment-${comment.id}">
+            <div class="comment-header">
+                <img src="${avatar}" alt="${comment.user.username}" class="comment-avatar" 
+                     loading="lazy"
+                     onerror="this.outerHTML='<div class=\\'comment-avatar\\'>${comment.user.username.charAt(0).toUpperCase()}</div>'">
+                <div class="comment-user-info">
+                    <span class="comment-username">${comment.user.username}</span>
+                    <span class="comment-date">${formatDate(comment.created_at)}</span>
+                </div>
+                ${spoilerBadge}
+            </div>
+            <div class="comment-content ${spoilerClass}" onclick="this.classList.toggle('hidden')">
+                ${escapeHtml(comment.content)}
+            </div>
+            <div class="comment-actions">
+                <button class="comment-action ${comment.is_liked ? 'liked' : ''}" onclick="toggleCommentLike(${comment.id})">
+                    <i class="fas fa-heart"></i> <span id="likes-${comment.id}">${comment.likes_count || 0}</span>
+                </button>
+                ${window.USER_ID ? `
+                    <button class="comment-action" onclick="showCommentForm(${comment.id})">
+                        <i class="fas fa-reply"></i> Reply
+                    </button>
+                    ${comment.user_id === window.USER_ID ? `
+                        <button class="comment-action" onclick="deleteComment(${comment.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    ` : ''}
+                ` : ''}
+            </div>
+            <div class="comment-replies" id="replies-${comment.id}">
+                ${comment.replies_count > 0 ? '<div class="comments-loading"><i class="fas fa-spinner fa-spin"></i></div>' : ''}
+            </div>
+            ${comment.replies_count > 0 ? `<button class="reply-btn" onclick="loadReplies(${comment.id})">Show ${comment.replies_count} ${comment.replies_count === 1 ? 'reply' : 'replies'}</button>` : ''}
+        </div>
+    `;
+}
+
+async function loadReplies(commentId) {
+    const container = document.getElementById(`replies-${commentId}`);
+    
+    try {
+        const response = await fetch(`/api/comments/${commentId}/replies`);
+        const data = await response.json();
+        
+        if (data.success) {
+            container.innerHTML = data.replies.map(reply => renderComment(reply)).join('');
+        }
+    } catch (error) {
+        console.error('Load replies error:', error);
+    }
+}
+
+async function toggleCommentLike(commentId) {
+    if (!window.USER_ID) {
+        ComicVault.showToast('Please login to like comments', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/comments/${commentId}/like`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            const likesEl = document.getElementById(`likes-${commentId}`);
+            likesEl.textContent = data.likes_count;
+            
+            const btn = likesEl.closest('.comment-action');
+            btn.classList.toggle('liked', data.liked);
+        }
+    } catch (error) {
+        console.error('Like error:', error);
+    }
+}
+
+async function deleteComment(commentId) {
+    if (!confirm('Delete this comment?')) return;
+    
+    try {
+        const response = await fetch(`/api/comments/${commentId}`, { method: 'DELETE' });
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById(`comment-${commentId}`).remove();
+            ComicVault.showToast('Comment deleted', 'success');
+        } else {
+            ComicVault.showToast(data.message || 'Failed to delete', 'error');
+        }
+    } catch (error) {
+        console.error('Delete error:', error);
+    }
+}
+
+function loadMoreComments() {
+    commentsPage++;
+    loadComments();
+}
+
+function formatDate(dateStr) {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diff = now - date;
+    
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+    
+    return date.toLocaleDateString();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Character counter
+document.addEventListener('DOMContentLoaded', () => {
+    const textarea = document.getElementById('comment-content');
+    const counter = document.getElementById('char-count');
+    
+    textarea?.addEventListener('input', () => {
+        counter.textContent = textarea.value.length;
+    });
+});
+</script>
+{% endmacro %}

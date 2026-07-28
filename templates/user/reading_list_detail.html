@@ -1,0 +1,433 @@
+{% extends "base.html" %}
+
+{% block title %}{{ reading_list.name }} - ComicVault{% endblock %}
+
+{% block extra_css %}
+<style>
+    .list-detail-header {
+        background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+        border-radius: 1rem;
+        padding: 2rem;
+        color: white;
+        margin-bottom: 2rem;
+    }
+
+    .list-detail-header h1 {
+        margin: 0 0 0.5rem 0;
+    }
+
+    .list-detail-header .meta {
+        display: flex;
+        gap: 1.5rem;
+        opacity: 0.9;
+        margin-bottom: 1rem;
+    }
+
+    .list-detail-header .description {
+        opacity: 0.9;
+        margin-bottom: 1rem;
+    }
+
+    .list-detail-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .list-detail-actions button {
+        padding: 0.5rem 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .list-detail-actions button:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+
+    .list-detail-actions button.delete:hover {
+        background: rgba(239, 68, 68, 0.8);
+        border-color: rgba(239, 68, 68, 0.8);
+    }
+
+    .comics-section {
+        margin-top: 2rem;
+    }
+
+    .comics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .comic-card {
+        background: var(--card-bg);
+        border-radius: 0.75rem;
+        overflow: hidden;
+        transition: all 0.3s ease;
+        border: 1px solid var(--border-color);
+        position: relative;
+    }
+
+    .comic-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        border-color: var(--primary-color);
+    }
+
+    .comic-card .cover-wrapper {
+        position: relative;
+        padding-bottom: 140%;
+        overflow: hidden;
+    }
+
+    .comic-card .cover {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .comic-card .overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(transparent 50%, rgba(0,0,0,0.8));
+        opacity: 0;
+        transition: opacity 0.3s;
+        display: flex;
+        align-items: flex-end;
+        padding: 1rem;
+    }
+
+    .comic-card:hover .overlay {
+        opacity: 1;
+    }
+
+    .comic-card .remove-btn {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(239, 68, 68, 0.9);
+        color: white;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.3s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+    }
+
+    .comic-card:hover .remove-btn {
+        opacity: 1;
+    }
+
+    .comic-card .remove-btn:hover {
+        background: #dc2626;
+    }
+
+    .comic-card .info {
+        padding: 1rem;
+    }
+
+    .comic-card .title {
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 0.25rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--text-color);
+    }
+
+    .comic-card .author {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        color: var(--text-muted);
+    }
+
+    .empty-state i {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.3;
+    }
+
+    .empty-state h3 {
+        color: var(--text-color);
+        margin-bottom: 0.5rem;
+    }
+
+    @media (max-width: 768px) {
+        .list-detail-header {
+            padding: 1.5rem;
+        }
+
+        .list-detail-header .meta {
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .comics-grid {
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 1rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Header -->
+    <div class="list-detail-header">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <h1>{{ reading_list.name }}</h1>
+                <div class="meta">
+                    <span><i class="fas fa-book"></i> {{ comics|length }} {{ 'comic' if comics|length == 1 else 'comics' }}</span>
+                    {% if reading_list.is_public %}
+                    <span><i class="fas fa-globe"></i> Public</span>
+                    {% else %}
+                    <span><i class="fas fa-lock"></i> Private</span>
+                    {% endif %}
+                    <span><i class="fas fa-calendar"></i> Created {{ reading_list.created_at.strftime('%b %d, %Y') }}</span>
+                </div>
+                {% if reading_list.description %}
+                <p class="description">{{ reading_list.description }}</p>
+                {% endif %}
+            </div>
+            <div class="list-detail-actions">
+                <button onclick="editList()">
+                    <i class="fas fa-edit"></i> Edit
+                </button>
+                <button class="delete" onclick="deleteList()">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Comics Grid -->
+    <div class="comics-section">
+        {% if comics %}
+        <div class="comics-grid">
+            {% for comic in comics %}
+            <div class="comic-card" data-comic-id="{{ comic.id }}">
+                <button class="remove-btn" onclick="removeFromList({{ comic.id }}, event)" title="Remove from list">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="cover-wrapper">
+                    <img src="{{ url_for('static', filename='covers/' + comic.cover_image) if comic.cover_image else url_for('static', filename='images/placeholder.png') }}" 
+                         alt="{{ comic.title }}" 
+                         class="cover"
+                         loading="lazy"
+                         onerror="this.src='{{ url_for('static', filename='images/placeholder.png') }}'">
+                    <div class="overlay">
+                        <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}" class="btn-read" style="color: white;">
+                            <i class="fas fa-book-reader"></i> Read Now
+                        </a>
+                    </div>
+                </div>
+                <div class="info">
+                    <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}" class="title">{{ comic.title }}</a>
+                    <div class="author">{{ comic.author or 'Unknown' }}</div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <i class="fas fa-book-open"></i>
+            <h3>This List is Empty</h3>
+            <p>Start adding comics to your reading list!</p>
+            <a href="{{ url_for('main.home') }}" class="btn" style="background: var(--primary-color); color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; text-decoration: none; display: inline-block; margin-top: 1rem;">
+                Browse Comics
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="editModal">
+    <div class="modal" style="background: var(--card-bg); border-radius: 1rem; padding: 2rem; max-width: 500px; width: 90%;">
+        <h2 style="margin: 0 0 1.5rem 0; color: var(--text-color);">Edit Reading List</h2>
+        <form id="editForm" onsubmit="return saveList(event)">
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: var(--text-color); font-weight: 500;">List Name</label>
+                <input type="text" id="list-name" value="{{ reading_list.name }}" required maxlength="100"
+                       style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 0.5rem; background: var(--input-bg); color: var(--text-color); font-size: 1rem;">
+            </div>
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: var(--text-color); font-weight: 500;">Description</label>
+                <textarea id="list-description" maxlength="500"
+                          style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 0.5rem; background: var(--input-bg); color: var(--text-color); font-size: 1rem; resize: vertical; min-height: 80px;">{{ reading_list.description or '' }}</textarea>
+            </div>
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label style="display: flex; align-items: center; gap: 1rem; cursor: pointer;">
+                    <input type="checkbox" id="list-is-public" {% if reading_list.is_public %}checked{% endif %}
+                           style="width: 20px; height: 20px; accent-color: var(--primary-color);">
+                    <span style="color: var(--text-color);">Make this list public</span>
+                </label>
+            </div>
+            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                <button type="button" onclick="hideEditModal()" 
+                        style="padding: 0.75rem 1.5rem; border: 1px solid var(--border-color); background: transparent; color: var(--text-color); border-radius: 0.5rem; cursor: pointer;">
+                    Cancel
+                </button>
+                <button type="submit" 
+                        style="padding: 0.75rem 1.5rem; border: none; background: var(--primary-color); color: white; border-radius: 0.5rem; cursor: pointer; font-weight: 600;">
+                    Save Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const listId = {{ reading_list.id }};
+
+function editList() {
+    document.getElementById('editModal').classList.add('active');
+}
+
+function hideEditModal() {
+    document.getElementById('editModal').classList.remove('active');
+}
+
+async function saveList(event) {
+    event.preventDefault();
+    
+    const name = document.getElementById('list-name').value.trim();
+    const description = document.getElementById('list-description').value.trim();
+    const isPublic = document.getElementById('list-is-public').checked;
+    
+    if (!name) {
+        ComicVault.showToast('Please enter a list name', 'error');
+        return false;
+    }
+    
+    try {
+        const response = await fetch(`/api/reading-lists/${listId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                description: description,
+                is_public: isPublic
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            ComicVault.showToast('List updated!', 'success');
+            hideEditModal();
+            setTimeout(() => location.reload(), 500);
+        } else {
+            ComicVault.showToast(data.message || 'Failed to update list', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving list:', error);
+        ComicVault.showToast('Failed to update list', 'error');
+    }
+    
+    return false;
+}
+
+async function removeFromList(comicId, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (!confirm('Remove this comic from your list?')) return;
+    
+    try {
+        const response = await fetch(`/api/reading-lists/${listId}/remove-comic/${comicId}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            ComicVault.showToast('Removed from list', 'success');
+            const card = document.querySelector(`.comic-card[data-comic-id="${comicId}"]`);
+            if (card) {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.8)';
+                setTimeout(() => card.remove(), 300);
+            }
+            updateCount();
+        } else {
+            ComicVault.showToast(data.message || 'Failed to remove', 'error');
+        }
+    } catch (error) {
+        console.error('Error removing from list:', error);
+        ComicVault.showToast('Failed to remove from list', 'error');
+    }
+}
+
+async function deleteList() {
+    if (!confirm('Are you sure you want to delete this list? This cannot be undone.')) return;
+    
+    try {
+        const response = await fetch(`/api/reading-lists/${listId}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            ComicVault.showToast('List deleted', 'success');
+            window.location.href = '/reading-lists';
+        } else {
+            ComicVault.showToast(data.message || 'Failed to delete list', 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting list:', error);
+        ComicVault.showToast('Failed to delete list', 'error');
+    }
+}
+
+function updateCount() {
+    const remaining = document.querySelectorAll('.comic-card').length;
+    const countEl = document.querySelector('.meta span:first-child');
+    if (countEl) {
+        countEl.innerHTML = `<i class="fas fa-book"></i> ${remaining} ${remaining === 1 ? 'comic' : 'comics'}`;
+    }
+}
+
+// Close modal on overlay click
+document.getElementById('editModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        hideEditModal();
+    }
+});
+
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        hideEditModal();
+    }
+});
+</script>
+{% endblock %}

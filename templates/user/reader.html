@@ -1,0 +1,1225 @@
+{% extends "base.html" %}
+{% from 'components/ad_placeholder.html' import ad_banner %}
+
+{% block title %}{{ comic.title }} - Reader{% endblock %}
+
+{% block extra_css %}
+<style>
+:root {
+    --reader-bg: #f5f5f5;
+    --reader-bg-dark: #1a1a1a;
+    --reader-bg-sepia: #f4ecd8;
+    --reader-text: #333;
+    --reader-text-dark: #e0e0e0;
+    --reader-text-sepia: #5c4b37;
+}
+
+.reader-container {
+    height: calc(100vh - 100px);
+    background-color: var(--reader-bg);
+    transition: background-color 0.3s ease;
+}
+
+.reader-container[data-theme="dark"] {
+    background-color: var(--reader-bg-dark);
+}
+
+.reader-container[data-theme="sepia"] {
+    background-color: var(--reader-bg-sepia);
+}
+
+.pdf-viewer {
+    height: 100%;
+    background-color: white;
+    box-shadow: 0 0 20px rgba(0,0,0,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    transition: background-color 0.3s ease;
+}
+
+.reader-container[data-theme="dark"] .pdf-viewer {
+    background-color: #2a2a2a;
+}
+
+.reader-container[data-theme="sepia"] .pdf-viewer {
+    background-color: #f4ecd8;
+}
+
+.reader-toolbar {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.sidebar-panel {
+    background-color: white;
+    border-right: 1px solid #dee2e6;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+}
+
+.reader-container[data-theme="dark"] .sidebar-panel {
+    background-color: #252525;
+    border-right-color: #333;
+    color: var(--reader-text-dark);
+}
+
+.reader-container[data-theme="sepia"] .sidebar-panel {
+    background-color: #f4ecd8;
+    border-right-color: #d4c4a8;
+    color: var(--reader-text-sepia);
+}
+
+.page-thumbnail {
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+}
+
+.page-thumbnail:hover {
+    border-color: #007bff;
+    transform: scale(1.05);
+}
+
+.page-thumbnail.active {
+    border-color: #007bff;
+    box-shadow: 0 0 10px rgba(0,123,255,0.3);
+}
+
+.fullscreen-mode .reader-container {
+    height: 100vh;
+}
+
+.fullscreen-mode .reader-toolbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+}
+
+.fullscreen-mode .sidebar-panel {
+    position: fixed;
+    top: 60px;
+    left: 0;
+    bottom: 0;
+    z-index: 999;
+}
+
+.reader-controls {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.8);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 25px;
+    z-index: 1001;
+}
+
+.rating-stars {
+    color: #ffc107;
+}
+
+/* Zoom Controls */
+.zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(255,255,255,0.1);
+    padding: 0.25rem 0.5rem;
+    border-radius: 20px;
+}
+
+.zoom-btn {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: white;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.zoom-btn:hover {
+    background: rgba(255,255,255,0.3);
+    transform: scale(1.1);
+}
+
+.zoom-level {
+    font-size: 0.85rem;
+    min-width: 50px;
+    text-align: center;
+}
+
+/* Theme Toggle */
+.theme-toggle {
+    display: flex;
+    gap: 0.25rem;
+    background: rgba(255,255,255,0.1);
+    padding: 0.25rem;
+    border-radius: 20px;
+}
+
+.theme-btn {
+    background: transparent;
+    border: none;
+    color: white;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.theme-btn:hover,
+.theme-btn.active {
+    background: rgba(255,255,255,0.3);
+}
+
+/* Auto-play indicator */
+.auto-play-indicator {
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    background: rgba(139, 92, 246, 0.9);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    z-index: 1002;
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.auto-play-indicator.active {
+    display: flex;
+}
+
+.auto-play-indicator .progress-ring {
+    width: 20px;
+    height: 20px;
+}
+
+/* Blur-up placeholder for lazy loading */
+.blur-up {
+    filter: blur(10px);
+    transition: filter 0.3s ease;
+}
+
+.blur-up.loaded {
+    filter: blur(0);
+}
+
+/* Keyboard shortcut hints */
+.keyboard-hint {
+    position: fixed;
+    bottom: 80px;
+    right: 20px;
+    background: rgba(0,0,0,0.8);
+    color: white;
+    padding: 1rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    z-index: 1001;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+}
+
+.keyboard-hint.show {
+    opacity: 1;
+}
+
+.keyboard-hint kbd {
+    background: rgba(255,255,255,0.2);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+/* Focus styles for accessibility */
+.pdf-viewer:focus {
+    outline: 2px solid #8b5cf6;
+    outline-offset: -2px;
+}
+
+button:focus-visible,
+input:focus-visible {
+    outline: 2px solid #8b5cf6;
+    outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .reader-toolbar {
+        background: #000;
+    }
+    
+    .page-thumbnail.active {
+        border-width: 4px;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .page-thumbnail,
+    .zoom-btn,
+    .theme-btn,
+    .reader-container {
+        transition: none;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="reader-container">
+    <!-- Reader Toolbar -->
+    <div class="reader-toolbar p-3">
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center">
+                <a href="{{ url_for('main.comic_detail', id=comic.id) }}" class="btn btn-light me-3">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <div>
+                    <h5 class="mb-0">{{ comic.title }}</h5>
+                    <small class="opacity-75">by {{ comic.author }}</small>
+                </div>
+            </div>
+            
+            <div class="d-flex align-items-center gap-2">
+                <!-- Page Navigation -->
+                <div class="d-flex align-items-center bg-white bg-opacity-10 rounded px-2 py-1">
+                    <button class="btn btn-sm btn-light" onclick="previousPage()" title="Previous Page (←)">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <span class="mx-3" id="pageInfo">Page 1 / {{ total_pages }}</span>
+                    <button class="btn btn-sm btn-light" onclick="nextPage()" title="Next Page (→)">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+                
+                <!-- Zoom Controls -->
+                <div class="zoom-controls">
+                    <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out (-)">
+                        <i class="fas fa-search-minus"></i>
+                    </button>
+                    <span class="zoom-level" id="zoomLevel">100%</span>
+                    <button class="zoom-btn" onclick="zoomIn()" title="Zoom In (+)">
+                        <i class="fas fa-search-plus"></i>
+                    </button>
+                </div>
+                
+                <!-- Auto-advance Toggle -->
+                <button class="btn btn-sm btn-light" id="autoAdvanceBtn" onclick="toggleAutoAdvance()" title="Auto-Advance (A)">
+                    <i class="bi bi-play-fill"></i>
+                </button>
+                
+                <!-- Theme Toggle -->
+                <div class="theme-toggle">
+                    <button class="theme-btn active" data-theme="light" onclick="setTheme('light')" title="Light Mode">
+                        <i class="fas fa-sun"></i>
+                    </button>
+                    <button class="theme-btn" data-theme="sepia" onclick="setTheme('sepia')" title="Sepia Mode">
+                        <i class="fas fa-coffee"></i>
+                    </button>
+                    <button class="theme-btn" data-theme="dark" onclick="setTheme('dark')" title="Dark Mode (D)">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </div>
+                
+                <!-- Auto-play Toggle -->
+                <button class="btn btn-sm btn-light" id="autoPlayBtn" onclick="toggleAutoPlay()" title="Auto-play">
+                    <i class="fas fa-play"></i>
+                </button>
+                
+                <!-- Reader Settings -->
+                <div class="dropdown">
+                    <button class="btn btn-light dropdown-toggle" data-bs-toggle="dropdown">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="#" onclick="toggleSidebar()">
+                            <i class="fas fa-columns me-2"></i>Toggle Sidebar
+                        </a></li>
+                        <li><a class="dropdown-item" href="#" onclick="toggleFullscreen()">
+                            <i class="fas fa-expand me-2"></i>Fullscreen (F)
+                        </a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#" onclick="showKeyboardShortcuts()">
+                            <i class="fas fa-keyboard me-2"></i>Keyboard Shortcuts (?)
+                        </a></li>
+                        <li><a class="dropdown-item" href="#" onclick="showSettings()">
+                            <i class="fas fa-sliders-h me-2"></i>Advanced Settings
+                        </a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Auto-play Indicator -->
+    <div class="auto-play-indicator" id="autoPlayIndicator">
+        <svg class="progress-ring" viewBox="0 0 20 20">
+            <circle cx="10" cy="10" r="8" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+            <circle cx="10" cy="10" r="8" fill="none" stroke="white" stroke-width="2"
+                    stroke-dasharray="50.27" stroke-dashoffset="0" id="autoPlayProgress"/>
+        </svg>
+        <span>Auto-playing...</span>
+    </div>
+    
+    <!-- Keyboard Shortcuts Hint -->
+    <div class="keyboard-hint" id="keyboardHint">
+        <strong>Keyboard Shortcuts</strong><br>
+        <kbd>←</kbd> <kbd>→</kbd> Navigate pages<br>
+        <kbd>+</kbd> <kbd>-</kbd> Zoom in/out<br>
+        <kbd>F</kbd> Fullscreen<br>
+        <kbd>Space</kbd> Auto-play<br>
+        <kbd>L</kbd> <kbd>D</kbd> Light/Dark mode<br>
+        <kbd>?</kbd> Show this help
+    </div>
+    
+    <div class="d-flex">
+        <!-- Sidebar -->
+        <div class="sidebar-panel p-3" id="sidebarPanel" style="width: 300px;">
+            <!-- Comic Info -->
+            <div class="mb-4">
+                <img src="{{ comic.cover_image or '/static/images/default-cover.jpg' }}" 
+                     class="img-fluid rounded mb-3 lazy-image" 
+                     alt="{{ comic.title }}"
+                     loading="lazy">
+                <h6>{{ comic.title }}</h6>
+                <p class="text-muted small">{{ comic.author }}</p>
+                <span class="badge bg-primary">{{ comic.category }}</span>
+                <p class="mt-2 small">{{ comic.description[:100] }}...</p>
+            </div>
+            
+            <!-- Page Thumbnails -->
+            <div class="mb-4">
+                <h6 class="mb-3">Pages</h6>
+                <div class="row g-2" id="pageThumbnails">
+                    {% for page in range(1, 11) %}
+                    <div class="col-4">
+                        <div class="page-thumbnail {% if page == 1 %}active{% endif %}" 
+                             onclick="goToPage({{ page }})">
+                            <img src="https://via.placeholder.com/100x140/6c757d/ffffff?text={{ page }}" 
+                                 class="img-fluid rounded lazy-image" 
+                                 alt="Page {{ page }}"
+                                 loading="lazy">
+                            <small class="d-block text-center mt-1">Page {{ page }}</small>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if total_pages > 10 %}
+                <button class="btn btn-sm btn-outline-primary w-100 mt-2" 
+                        onclick="loadMoreThumbnails()">
+                    Load More Pages...
+                </button>
+                {% endif %}
+            </div>
+            
+            <!-- Reading Progress -->
+            <div class="mb-4">
+                <h6 class="mb-3">Reading Progress</h6>
+                <div class="progress mb-2">
+                    <div class="progress-bar" role="progressbar" 
+                         style="width: {{ (current_page / total_pages * 100)|round }}%"></div>
+                </div>
+                <small class="text-muted">
+                    Page {{ current_page }} of {{ total_pages }}
+                    ({{ (current_page / total_pages * 100)|round }}% complete)
+                </small>
+            </div>
+            
+            <!-- Quick Actions -->
+            <div class="mb-4">
+                <h6 class="mb-3">Quick Actions</h6>
+                <div class="d-grid gap-2">
+                    <button class="btn btn-sm btn-outline-primary" onclick="addBookmark()">
+                        <i class="fas fa-bookmark me-2"></i>Add Bookmark
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="shareComic()">
+                        <i class="fas fa-share me-2"></i>Share
+                    </button>
+                    <button class="btn btn-sm btn-outline-info" onclick="showNotes()">
+                        <i class="fas fa-sticky-note me-2"></i>Notes
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Rating -->
+            <div class="mb-4">
+                <h6 class="mb-3">Rate this Comic</h6>
+                <div class="rating-stars">
+                    {% for i in range(5) %}
+                    <i class="fas fa-star {% if i < user_rating %}text-warning{% else %}text-muted{% endif %}" 
+                       onclick="rateComic({{ i + 1 }})" style="cursor: pointer;"></i>
+                    {% endfor %}
+                </div>
+                <small class="text-muted">Your rating: {{ user_rating }}/5</small>
+            </div>
+        </div>
+        
+        <!-- PDF Viewer -->
+        <div class="flex-grow-1">
+            <div class="pdf-viewer" id="pdfViewer">
+                <canvas id="pdfCanvas" class="w-100 h-100"></canvas>
+                
+                <!-- Loading Overlay -->
+                <div class="d-flex justify-content-center align-items-center h-100" id="loadingOverlay">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;"></div>
+                        <p>Loading comic...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Reader Controls (Bottom) -->
+    <div class="reader-controls d-none" id="readerControls">
+        <div class="d-flex align-items-center gap-3">
+            <button class="btn btn-sm btn-light" onclick="previousPage()">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+            <span id="currentPageDisplay">1 / {{ total_pages }}</span>
+            <button class="btn btn-sm btn-light" onclick="nextPage()">
+                <i class="fas fa-chevron-right"></i>
+            </button>
+            
+            <div class="vr"></div>
+            
+            <button class="btn btn-sm btn-light" onclick="toggleAutoPlay()">
+                <i class="fas fa-play" id="autoPlayIcon"></i>
+            </button>
+            
+            <div class="vr"></div>
+            
+            <span class="small" id="readingTime">
+                <i class="fas fa-clock me-1"></i>Reading time: 0m
+            </span>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal fade" id="settingsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Reader Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Page Transition</label>
+                    <select class="form-select" id="pageTransition">
+                        <option value="none">None</option>
+                        <option value="fade">Fade</option>
+                        <option value="slide">Slide</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Auto-Play Speed (seconds per page)</label>
+                    <input type="range" class="form-range" id="autoPlaySpeed" 
+                           min="2" max="30" value="5">
+                    <small class="text-muted">5 seconds</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Quality</label>
+                    <select class="form-select" id="quality">
+                        <option value="low">Low (Faster)</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High (Slower)</option>
+                    </select>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="rememberPosition" checked>
+                    <label class="form-check-label" for="rememberPosition">
+                        Remember reading position
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+// Set PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+let pdfDoc = null;
+let currentPage = 1;
+let pageRendering = false;
+let pageNumPending = null;
+let scale = 1.5;
+let canvas = document.getElementById('pdfCanvas');
+let ctx = canvas.getContext('2d');
+let autoPlayInterval = null;
+let readingStartTime = Date.now();
+
+// Load PDF
+function loadPDF() {
+    const url = '{{ comic.pdf_file }}';
+    
+    pdfjsLib.getDocument(url).promise.then(function(pdfDoc_) {
+        pdfDoc = pdfDoc_;
+        document.getElementById('pageInput').max = pdfDoc.numPages;
+        
+        // Render first page
+        renderPage(currentPage);
+        
+        // Hide loading overlay
+        document.getElementById('loadingOverlay').classList.add('d-none');
+        
+        // Initialize reading stats
+        updateReadingProgress();
+    }).catch(function(error) {
+        console.error('Error loading PDF:', error);
+        document.getElementById('loadingOverlay').innerHTML = `
+            <div class="text-center text-danger">
+                <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
+                <p>Failed to load comic</p>
+                <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+            </div>
+        `;
+    });
+}
+
+// Render page
+function renderPage(num) {
+    pageRendering = true;
+    
+    pdfDoc.getPage(num).then(function(page) {
+        const viewport = page.getViewport({scale: scale});
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        
+        const renderContext = {
+            canvasContext: ctx,
+            viewport: viewport
+        };
+        
+        const renderTask = page.render(renderContext);
+        
+        renderTask.promise.then(function() {
+            pageRendering = false;
+            
+            if (pageNumPending !== null) {
+                renderPage(pageNumPending);
+                pageNumPending = null;
+            }
+            
+            updatePageDisplay();
+            updateReadingProgress();
+            saveReadingProgress();
+        });
+    });
+}
+
+// Queue render page
+function queueRenderPage(num) {
+    if (pageRendering) {
+        pageNumPending = num;
+    } else {
+        renderPage(num);
+    }
+}
+
+// Navigation functions
+function previousPage() {
+    if (currentPage <= 1) return;
+    currentPage--;
+    queueRenderPage(currentPage);
+}
+
+function nextPage() {
+    if (currentPage >= pdfDoc.numPages) return;
+    currentPage++;
+    queueRenderPage(currentPage);
+}
+
+function goToPage(pageNum) {
+    pageNum = parseInt(pageNum);
+    if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
+    currentPage = pageNum;
+    queueRenderPage(currentPage);
+}
+
+// Zoom functions
+function zoomIn() {
+    scale = Math.min(scale * 1.2, 5.0);
+    queueRenderPage(currentPage);
+    updateZoomDisplay();
+}
+
+function zoomOut() {
+    scale = Math.max(scale / 1.2, 0.25);
+    queueRenderPage(currentPage);
+    updateZoomDisplay();
+}
+
+function zoomReset() {
+    scale = 1.0;
+    queueRenderPage(currentPage);
+    updateZoomDisplay();
+}
+
+function updateZoomDisplay() {
+    const zoomLevel = Math.round(scale * 100);
+    const zoomElement = document.getElementById('zoomLevel');
+    if (zoomElement) {
+        zoomElement.textContent = zoomLevel + '%';
+    }
+}
+
+// View mode functions
+function setViewMode(mode) {
+    // Update button states
+    document.querySelectorAll('[id$="ViewBtn"]').forEach(btn => {
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-light');
+    });
+    document.getElementById(mode + 'ViewBtn').classList.remove('btn-light');
+    document.getElementById(mode + 'ViewBtn').classList.add('btn-primary');
+    
+    // Implement view mode changes
+    console.log('View mode:', mode);
+}
+
+// UI functions
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebarPanel');
+    sidebar.classList.toggle('d-none');
+}
+
+function toggleFullscreen() {
+    document.body.classList.toggle('fullscreen-mode');
+    
+    if (document.fullscreenElement) {
+        document.exitFullscreen();
+    } else {
+        document.documentElement.requestFullscreen();
+    }
+}
+
+function toggleNightMode() {
+    document.body.classList.toggle('bg-dark');
+    document.body.classList.toggle('text-white');
+}
+
+function showSettings() {
+    const modal = new bootstrap.Modal(document.getElementById('settingsModal'));
+    modal.show();
+}
+
+// Auto-advance functionality
+let autoAdvanceInterval = null;
+let autoAdvanceDelay = 5000; // Default 5 seconds
+
+function toggleAutoAdvance() {
+    const btn = document.getElementById('autoAdvanceBtn');
+    const icon = btn.querySelector('i');
+    
+    if (autoAdvanceInterval) {
+        // Stop auto-advance
+        clearInterval(autoAdvanceInterval);
+        autoAdvanceInterval = null;
+        icon.className = 'bi bi-play-fill';
+        btn.classList.remove('btn-success');
+        btn.classList.add('btn-light');
+        btn.title = 'Start Auto-Advance (A)';
+        showToast('Auto-advance stopped');
+    } else {
+        // Start auto-advance
+        autoAdvanceInterval = setInterval(() => {
+            if (currentPage < pdfDoc.numPages) {
+                nextPage();
+            } else {
+                toggleAutoAdvance(); // Stop at end
+            }
+        }, autoAdvanceDelay);
+        icon.className = 'bi bi-pause-fill';
+        btn.classList.remove('btn-light');
+        btn.classList.add('btn-success');
+        btn.title = 'Stop Auto-Advance (A)';
+        showToast('Auto-advance started (' + (autoAdvanceDelay / 1000) + 's)');
+    }
+}
+
+function setAutoAdvanceDelay(delay) {
+    autoAdvanceDelay = delay;
+    // If auto-advance is running, restart with new delay
+    if (autoAdvanceInterval) {
+        toggleAutoAdvance();
+        toggleAutoAdvance();
+    }
+}
+
+// Dark mode toggle
+function toggleDarkMode() {
+    const body = document.body;
+    const readerContainer = document.getElementById('readerContainer');
+    const isDark = body.classList.toggle('dark-mode');
+    
+    if (readerContainer) {
+        readerContainer.style.backgroundColor = isDark ? '#1a1a1a' : '#ffffff';
+    }
+    
+    // Save preference
+    localStorage.setItem('reader_dark_mode', isDark ? 'true' : 'false');
+}
+
+// Restore dark mode preference on load
+function restoreDarkMode() {
+    const savedDarkMode = localStorage.getItem('reader_dark_mode');
+    if (savedDarkMode === 'true') {
+        document.body.classList.add('dark-mode');
+        const readerContainer = document.getElementById('readerContainer');
+        if (readerContainer) {
+            readerContainer.style.backgroundColor = '#1a1a1a';
+        }
+    }
+}
+
+// Toast notification helper
+function showToast(message) {
+    // Create toast element if it doesn't exist
+    let toastContainer = document.getElementById('toastContainer');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toastContainer';
+        toastContainer.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;';
+        document.body.appendChild(toastContainer);
+    }
+    
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification';
+    toast.style.cssText = 'background:rgba(0,0,0,0.8);color:white;padding:12px 20px;border-radius:8px;margin-top:8px;font-size:14px;animation:fadeIn 0.3s;';
+    toast.textContent = message;
+    
+    toastContainer.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    }, 2000);
+}
+
+// Theme management
+function setTheme(theme) {
+    const readerContainer = document.getElementById('readerContainer');
+    if (readerContainer) {
+        readerContainer.setAttribute('data-theme', theme);
+    }
+    
+    // Update active button state
+    document.querySelectorAll('.theme-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('data-theme') === theme) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Save preference
+    localStorage.setItem('reader_theme', theme);
+}
+
+// Restore theme preference on load
+function restoreTheme() {
+    const savedTheme = localStorage.getItem('reader_theme') || 'light';
+    setTheme(savedTheme);
+}
+
+// Utility functions
+function updatePageDisplay() {
+    document.getElementById('pageInput').value = currentPage;
+    document.getElementById('currentPageDisplay').textContent = `${currentPage} / ${pdfDoc.numPages}`;
+    
+    // Update active thumbnail
+    document.querySelectorAll('.page-thumbnail').forEach(thumb => {
+        thumb.classList.remove('active');
+    });
+    
+    const currentThumb = document.querySelector(`.page-thumbnail:nth-child(${currentPage})`);
+    if (currentThumb) {
+        currentThumb.classList.add('active');
+        currentThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+}
+
+function updateReadingProgress() {
+    const progress = (currentPage / pdfDoc.numPages) * 100;
+    document.querySelector('.progress-bar').style.width = progress + '%';
+    
+    const progressText = `Page ${currentPage} of ${pdfDoc.numPages} (${Math.round(progress)}% complete)`;
+    document.querySelector('.text-muted').textContent = progressText;
+}
+
+function saveReadingProgress() {
+    // Save to server
+    fetch('/api/reading-progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            comic_id: {{ comic.id }},
+            page: currentPage,
+            progress: (currentPage / pdfDoc.numPages) * 100
+        })
+    });
+}
+
+// Auto-play functions
+function toggleAutoPlay() {
+    const icon = document.getElementById('autoPlayIcon');
+    
+    if (autoPlayInterval) {
+        clearInterval(autoPlayInterval);
+        autoPlayInterval = null;
+        icon.classList.remove('fa-pause');
+        icon.classList.add('fa-play');
+    } else {
+        const speed = parseInt(document.getElementById('autoPlaySpeed').value) * 1000;
+        autoPlayInterval = setInterval(nextPage, speed);
+        icon.classList.remove('fa-play');
+        icon.classList.add('fa-pause');
+    }
+}
+
+// Rating function
+function rateComic(rating) {
+    fetch('/api/rate-comic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            comic_id: {{ comic.id }},
+            rating: rating
+        })
+    }).then(response => response.json())
+      .then(data => {
+          if (data.success) {
+              // Update star display
+              document.querySelectorAll('.rating-stars i').forEach((star, index) => {
+                  if (index < rating) {
+                      star.classList.remove('text-muted');
+                      star.classList.add('text-warning');
+                  } else {
+                      star.classList.remove('text-warning');
+                      star.classList.add('text-muted');
+                  }
+              });
+          }
+      });
+}
+
+// Bookmark management
+function addBookmark() {
+    const note = prompt('Add a note for this bookmark (optional):', '');
+    fetch('/api/bookmarks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            comic_id: {{ comic.id }},
+            chapter_id: {{ chapter_id }},
+            page_number: currentPage,
+            note: note || ''
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('Bookmark added successfully!', 'success');
+        } else {
+            showToast(data.message || 'Failed to add bookmark', 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error adding bookmark:', error);
+        showToast('Error adding bookmark', 'error');
+    });
+}
+
+function loadBookmarks() {
+    fetch('/api/bookmarks/comic/{{ comic.id }}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                displayBookmarks(data.bookmarks);
+            }
+        });
+}
+
+function displayBookmarks(bookmarks) {
+    const list = document.getElementById('bookmarkList');
+    if (!list) return;
+    
+    if (bookmarks.length === 0) {
+        list.innerHTML = '<p class="text-muted text-center p-3">No bookmarks yet</p>';
+        return;
+    }
+    
+    list.innerHTML = bookmarks.map(b => `
+        <div class="bookmark-item p-2 border-bottom d-flex justify-content-between align-items-center">
+            <div onclick="goToPage(${b.page_number})" style="cursor:pointer">
+                <strong>Page ${b.page_number}</strong>
+                ${b.note ? `<br><small class="text-muted">${b.note}</small>` : ''}
+            </div>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteBookmark(${b.id})">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+function deleteBookmark(bookmarkId) {
+    if (!confirm('Delete this bookmark?')) return;
+    
+    fetch('/api/bookmarks/' + bookmarkId, { method: 'DELETE' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showToast('Bookmark deleted', 'success');
+                loadBookmarks();
+            }
+        });
+}
+
+function jumpToBookmark(pageNumber) {
+    goToPage(pageNumber);
+    const modal = bootstrap.Modal.getInstance(document.getElementById('bookmarkModal'));
+    if (modal) modal.hide();
+}
+
+// Reading progress tracking
+function updateReadingProgress() {
+    if (!pdfDoc) return;
+    
+    const timeSpent = Math.floor((Date.now() - readingStartTime) / 1000);
+    
+    fetch('/api/reading-progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            comic_id: {{ comic.id }},
+            chapter_id: {{ chapter_id }},
+            page_number: currentPage,
+            total_pages: pdfDoc.numPages,
+            time_spent: timeSpent
+        })
+    })
+    .catch(error => console.error('Error updating reading progress:', error));
+}
+
+// Save progress periodically
+setInterval(updateReadingProgress, 30000);
+
+// Chapter navigation
+function loadChapters() {
+    fetch('/api/comics/{{ comic.id }}/chapters')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                displayChapterList(data.chapters);
+            }
+        });
+}
+
+function displayChapterList(chapters) {
+    const list = document.getElementById('chapterList');
+    if (!list) return;
+    
+    list.innerHTML = chapters.map(c => `
+        <a href="/reader/{{ comic.id }}/${c.id}" 
+           class="list-group-item list-group-item-action ${c.id == chapter_id ? 'active' : ''}">
+            Chapter ${c.number}: ${c.title || 'Chapter ' + c.number}
+        </a>
+    `).join('');
+}
+
+function getNextChapter() {
+    fetch('/api/chapters/{{ chapter_id }}/next')
+        .then(response => response.json())
+        .then(data => {
+            if (data.chapter) {
+                window.location.href = `/reader/{{ comic.id }}/${data.chapter.id}`;
+            } else {
+                showToast('No next chapter available', 'info');
+            }
+        });
+}
+
+function getPrevChapter() {
+    fetch('/api/chapters/{{ chapter_id }}/prev')
+        .then(response => response.json())
+        .then(data => {
+            if (data.chapter) {
+                window.location.href = `/reader/{{ comic.id }}/${data.chapter.id}`;
+            } else {
+                showToast('No previous chapter available', 'info');
+            }
+        });
+}
+
+// Toast notification helper
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast-notification toast-${type}`;
+    toast.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i> ${message}`;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+function shareComic() {
+    if (navigator.share) {
+        navigator.share({
+            title: '{{ comic.title }}',
+            text: 'Check out this comic!',
+            url: window.location.href
+        });
+    } else {
+        navigator.clipboard.writeText(window.location.href);
+        alert('Link copied to clipboard!');
+    }
+}
+
+function showNotes() {
+    alert('Notes feature coming soon!');
+}
+
+function loadMoreThumbnails() {
+    // Load more page thumbnails
+    console.log('Loading more thumbnails...');
+}
+
+function saveSettings() {
+    const modal = bootstrap.Modal.getInstance(document.getElementById('settingsModal'));
+    modal.hide();
+}
+
+// Update reading time
+setInterval(() => {
+    const elapsed = Math.floor((Date.now() - readingStartTime) / 1000 / 60);
+    document.getElementById('readingTime').innerHTML = 
+        `<i class="fas fa-clock me-1"></i>Reading time: ${elapsed}m`;
+}, 60000);
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    // Don't trigger shortcuts if user is typing in an input
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+    }
+    
+    switch(e.key) {
+        case 'ArrowLeft':
+        case 'PageUp':
+            e.preventDefault();
+            previousPage();
+            break;
+        case 'ArrowRight':
+        case 'PageDown':
+        case ' ':
+            e.preventDefault();
+            nextPage();
+            break;
+        case 'Home':
+            e.preventDefault();
+            goToPage(1);
+            break;
+        case 'End':
+            e.preventDefault();
+            if (pdfDoc) {
+                goToPage(pdfDoc.numPages);
+            }
+            break;
+        case '+':
+        case '=':
+            e.preventDefault();
+            zoomIn();
+            break;
+        case '-':
+            e.preventDefault();
+            zoomOut();
+            break;
+        case '0':
+            e.preventDefault();
+            zoomReset();
+            break;
+        case 'f':
+            e.preventDefault();
+            toggleFullscreen();
+            break;
+        case 'b':
+            e.preventDefault();
+            addBookmark();
+            break;
+        case 'd':
+            e.preventDefault();
+            toggleDarkMode();
+            break;
+        case 'a':
+            e.preventDefault();
+            toggleAutoAdvance();
+            break;
+        case 'Escape':
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            }
+            break;
+    }
+});
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+    loadPDF();
+    loadBookmarks();
+    loadChapters();
+    
+    // Restore theme preference
+    restoreTheme();
+    
+    // Restore last reading position
+    const savedPage = localStorage.getItem('comic_{{ comic.id }}_last_page');
+    if (savedPage) {
+        goToPage(parseInt(savedPage));
+    }
+    
+    // Save position on page change
+    setInterval(() => {
+        localStorage.setItem('comic_{{ comic.id }}_last_page', currentPage);
+    }, 5000);
+});
+
+// Save position before leaving
+window.addEventListener('beforeunload', function() {
+    localStorage.setItem('comic_{{ comic.id }}_last_page', currentPage);
+    updateReadingProgress();
+});
+</script>
+{% endblock %}

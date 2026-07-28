@@ -1,0 +1,377 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics - ComicVault Admin{% endblock %}
+
+{% block extra_css %}
+<style>
+.stats-card {
+    transition: transform 0.2s;
+}
+.stats-card:hover {
+    transform: translateY(-3px);
+}
+.chart-container {
+    position: relative;
+    height: 300px;
+}
+.progress-ring {
+    transform: rotate(-90deg);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-5">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5 fw-bold">
+                        <i class="fas fa-chart-line me-2 text-primary"></i>Analytics Dashboard
+                    </h1>
+                    <p class="text-muted">Monitor platform performance and user engagement</p>
+                </div>
+                <div>
+                    <button class="btn btn-outline-primary me-2" onclick="exportReport()">
+                        <i class="fas fa-download me-2"></i>Export Report
+                    </button>
+                    <button class="btn btn-primary" onclick="refreshData()">
+                        <i class="fas fa-sync-alt me-2"></i>Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Date Range Filter -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="row align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold">Date Range</label>
+                            <select class="form-select" id="dateRange">
+                                <option value="7">Last 7 days</option>
+                                <option value="30" selected>Last 30 days</option>
+                                <option value="90">Last 3 months</option>
+                                <option value="365">Last year</option>
+                                <option value="all">All time</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold">From</label>
+                            <input type="date" class="form-control" id="dateFrom">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold">To</label>
+                            <input type="date" class="form-control" id="dateTo">
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-primary w-100" onclick="applyDateFilter()">
+                                <i class="fas fa-filter me-2"></i>Apply Filter
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Key Metrics -->
+    <div class="row mb-4">
+        <div class="col-lg-3 col-md-6 mb-4">
+            <div class="card stats-card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-users fa-3x text-primary mb-3"></i>
+                    <h3 class="fw-bold">{{ stats.total_users }}</h3>
+                    <p class="text-muted mb-0">Total Users</p>
+                    <small class="text-success">
+                        <i class="fas fa-arrow-up"></i> +{{ recent_activity.new_users }} this month
+                    </small>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6 mb-4">
+            <div class="card stats-card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-book fa-3x text-success mb-3"></i>
+                    <h3 class="fw-bold">{{ stats.total_comics }}</h3>
+                    <p class="text-muted mb-0">Total Comics</p>
+                    <small class="text-success">
+                        <i class="fas fa-arrow-up"></i> +{{ recent_activity.new_comics }} this month
+                    </small>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6 mb-4">
+            <div class="card stats-card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-eye fa-3x text-info mb-3"></i>
+                    <h3 class="fw-bold">{{ "{:,}".format(stats.total_views) }}</h3>
+                    <p class="text-muted mb-0">Total Views</p>
+                    <small class="text-success">
+                        <i class="fas fa-chart-line"></i> Across platform
+                    </small>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6 mb-4">
+            <div class="card stats-card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-clock fa-3x text-warning mb-3"></i>
+                    <h3 class="fw-bold">{{ stats.avg_reading_time }}</h3>
+                    <p class="text-muted mb-0">Avg. Reading Time</p>
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle"></i> Per session
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="row mb-4">
+        <!-- User Growth Chart -->
+        <div class="col-lg-8 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-line me-2"></i>User Growth Over Time
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="userGrowthChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Category Distribution -->
+        <div class="col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-pie me-2"></i>Category Distribution
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="categoryChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Additional Charts Row -->
+    <div class="row mb-4">
+        <!-- Reading Activity -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-bar me-2"></i>Reading Activity
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="readingActivityChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Rating Distribution -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0">
+                        <i class="fas fa-star me-2"></i>Rating Distribution
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="ratingChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Comics Table -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-trophy me-2"></i>Top Performing Comics
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Title</th>
+                                    <th>Author</th>
+                                    <th>Category</th>
+                                    <th>Views</th>
+                                    <th>Completions</th>
+                                    <th>Rating</th>
+                                    <th>Trend</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for comic in most_viewed %}
+                                <tr>
+                                    <td>
+                                        {% if loop.index == 1 %}
+                                        <span class="badge bg-warning text-dark">1</span>
+                                        {% elif loop.index == 2 %}
+                                        <span class="badge bg-secondary">2</span>
+                                        {% elif loop.index == 3 %}
+                                        <span class="badge bg-danger">3</span>
+                                        {% else %}
+                                        {{ loop.index }}
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <img src="{{ comic.cover_url }}" 
+                                                 class="img-thumbnail me-2" style="width: 30px; height: 40px;">
+                                            <span>{{ comic.title }}</span>
+                                        </div>
+                                    </td>
+                                    <td>{{ comic.author or 'Unknown' }}</td>
+                                    <td><span class="badge bg-primary">{{ comic.category }}</span></td>
+                                    <td><strong>{{ comic.view_count|default(0) }}</strong></td>
+                                    <td>{{ comic.reading_progress.filter_by(completed=True).count() }}</td>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-star text-warning me-1"></i>
+                                            <span>{{ "%.1f"|format(comic.average_rating|default(0.0)) }}</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="text-success"><i class="fas fa-arrow-up"></i> Active</span></td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="8" class="text-center py-4">No comic data available yet.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Chart.js configuration
+const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+        legend: {
+            position: 'bottom',
+        }
+    }
+};
+
+// Load JSON data safely
+const chartDataUser = {{ chart_data_user | safe }};
+const chartDataCategory = {{ chart_data_category | safe }};
+const chartDataReading = {{ chart_data_reading | safe }};
+const chartDataRating = {{ chart_data_rating | safe }};
+
+// User Growth Chart
+const userGrowthCtx = document.getElementById('userGrowthChart').getContext('2d');
+new Chart(userGrowthCtx, {
+    type: 'line',
+    data: {
+        labels: chartDataUser.labels,
+        datasets: [{
+            label: 'New Users',
+            data: chartDataUser.data,
+            borderColor: '#007bff',
+            backgroundColor: 'rgba(0, 123, 255, 0.1)',
+            tension: 0.4,
+            fill: true
+        }]
+    },
+    options: chartOptions
+});
+
+// Category Distribution Chart
+const categoryCtx = document.getElementById('categoryChart').getContext('2d');
+new Chart(categoryCtx, {
+    type: 'doughnut',
+    data: {
+        labels: chartDataCategory.labels,
+        datasets: [{
+            data: chartDataCategory.data,
+            backgroundColor: [
+                '#007bff', '#28a745', '#ffc107', '#dc3545', '#17a2b8', '#6c757d',
+                '#6610f2', '#e83e8c', '#fd7e14', '#20c997', '#0dcaf0'
+            ]
+        }]
+    },
+    options: chartOptions
+});
+
+// Reading Activity Chart
+const readingCtx = document.getElementById('readingActivityChart').getContext('2d');
+new Chart(readingCtx, {
+    type: 'bar',
+    data: {
+        labels: chartDataReading.labels,
+        datasets: [{
+            label: 'Hours Read',
+            data: chartDataReading.data,
+            backgroundColor: '#17a2b8'
+        }]
+    },
+    options: chartOptions
+});
+
+// Rating Distribution Chart
+const ratingCtx = document.getElementById('ratingChart').getContext('2d');
+new Chart(ratingCtx, {
+    type: 'pie',
+    data: {
+        labels: chartDataRating.labels,
+        datasets: [{
+            data: chartDataRating.data,
+            backgroundColor: ['#dc3545', '#fd7e14', '#ffc107', '#20c997', '#28a745']
+        }]
+    },
+    options: chartOptions
+});
+
+// Functions
+function refreshData() {
+    location.reload();
+}
+
+function exportReport() {
+    // Implement export functionality
+    alert('Export feature coming soon!');
+}
+
+function applyDateFilter() {
+    const dateRange = document.getElementById('dateRange').value;
+    const dateFrom = document.getElementById('dateFrom').value;
+    const dateTo = document.getElementById('dateTo').value;
+    
+    console.log('Date filter:', { dateRange, dateFrom, dateTo });
+    // Implement date filtering
+}
+</script>
+{% endblock %}

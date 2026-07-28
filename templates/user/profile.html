@@ -1,0 +1,548 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - ComicVault{% endblock %}
+
+{% block extra_css %}
+<style>
+.profile-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 1rem;
+    padding: 2rem;
+    color: white;
+    text-align: center;
+}
+
+.avatar-upload {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    margin: 0 auto 1rem;
+}
+
+.avatar-upload img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 4px solid white;
+}
+
+.avatar-upload .upload-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    cursor: pointer;
+}
+
+.avatar-upload:hover .upload-overlay {
+    opacity: 1;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-item .number {
+    font-size: 2rem;
+    font-weight: bold;
+    display: block;
+}
+
+.stat-item .label {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+.reading-progress {
+    margin-top: 1rem;
+}
+
+.progress-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.progress-item:last-child {
+    border-bottom: none;
+}
+
+.favorite-genres {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.genre-badge {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 0.5rem 1rem;
+    border-radius: 1rem;
+    font-size: 0.9rem;
+}
+
+.settings-section {
+    background: white;
+    border-radius: 1rem;
+    padding: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin-bottom: 2rem;
+}
+
+.settings-section h5 {
+    color: #333;
+    margin-bottom: 1.5rem;
+    font-weight: bold;
+}
+
+.settings-section .form-label {
+    font-weight: 500;
+    color: #555;
+}
+
+.form-switch .form-check-input {
+    width: 3rem;
+    height: 1.5rem;
+}
+
+.recent-activity {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.activity-item {
+    padding: 1rem 0;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.activity-item:last-child {
+    border-bottom: none;
+}
+
+.activity-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+}
+
+@media (max-width: 768px) {
+    .profile-header {
+        padding: 1.5rem;
+    }
+    
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .settings-section {
+        padding: 1.5rem;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-5">
+    <!-- Profile Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="profile-header">
+                <div class="avatar-upload">
+                    <img src="/static/images/default-avatar.jpg" alt="Profile Avatar" id="avatarImage" loading="lazy">
+                    <div class="upload-overlay" onclick="document.getElementById('avatarInput').click()">
+                        <i class="fas fa-camera fa-lg"></i>
+                    </div>
+                    <input type="file" id="avatarInput" style="display: none;" accept="image/*" onchange="updateAvatar(event)">
+                </div>
+                
+                <h2 class="mb-1">{{ user.username }}</h2>
+                <p class="mb-3 opacity-80">{{ user.email }}</p>
+                
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="number">24</span>
+                        <span class="label">Total Comics</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="number">18</span>
+                        <span class="label">Completed</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="number">6</span>
+                        <span class="label">In Progress</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="number">142</span>
+                        <span class="label">Hours Read</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings & Preferences -->
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- Account Settings -->
+            <div class="settings-section">
+                <h5><i class="fas fa-user-cog me-2"></i>Account Settings</h5>
+                
+                <form id="accountSettingsForm">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" value="{{ user.username }}">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="email" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="email" value="{{ user.email }}">
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="firstName" class="form-label">First Name</label>
+                            <input type="text" class="form-control" id="firstName" placeholder="John">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="lastName" class="form-label">Last Name</label>
+                            <input type="text" class="form-control" id="lastName" placeholder="Doe">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="bio" class="form-label">Bio</label>
+                        <textarea class="form-control" id="bio" rows="3" placeholder="Tell us about yourself and your reading preferences..."></textarea>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>Save Changes
+                    </button>
+                </form>
+            </div>
+
+            <!-- Reading Preferences -->
+            <div class="settings-section">
+                <h5><i class="fas fa-book-reader me-2"></i>Reading Preferences</h5>
+                
+                <form id="preferencesForm">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="theme" class="form-label">Reading Theme</label>
+                            <select class="form-select" id="theme">
+                                <option value="light">Light</option>
+                                <option value="dark">Dark</option>
+                                <option value="sepia">Sepia</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="fontSize" class="form-label">Font Size</label>
+                            <select class="form-select" id="fontSize">
+                                <option value="small">Small</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="large">Large</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="readingMode" class="form-label">Reading Mode</label>
+                            <select class="form-select" id="readingMode">
+                                <option value="single">Single Page</option>
+                                <option value="double">Double Page</option>
+                                <option value="scroll">Continuous Scroll</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="language" class="form-label">Preferred Language</label>
+                            <select class="form-select" id="language">
+                                <option value="en">English</option>
+                                <option value="es">Spanish</option>
+                                <option value="fr">French</option>
+                                <option value="ja">Japanese</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="autoBookmark" checked>
+                            <label class="form-check-label" for="autoBookmark">
+                                Auto-bookmark reading progress
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="showPageNumbers" checked>
+                            <label class="form-check-label" for="showPageNumbers">
+                                Show page numbers in reader
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>Save Preferences
+                    </button>
+                </form>
+            </div>
+
+            <!-- Notification Settings -->
+            <div class="settings-section">
+                <h5><i class="fas fa-bell me-2"></i>Notifications</h5>
+                
+                <form id="notificationsForm">
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="emailNotifications" checked>
+                            <label class="form-check-label" for="emailNotifications">
+                                Email notifications
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="newComicAlerts" checked>
+                            <label class="form-check-label" for="newComicAlerts">
+                                New comic alerts
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="readingReminders">
+                            <label class="form-check-label" for="readingReminders">
+                                Reading reminders
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="weeklyDigest" checked>
+                            <label class="form-check-label" for="weeklyDigest">
+                                Weekly digest
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>Save Notification Settings
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <!-- Reading Progress -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="fw-bold mb-0">
+                        <i class="fas fa-chart-line me-2"></i>Reading Progress
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="reading-progress">
+                        <div class="progress-item">
+                            <div>
+                                <strong>Batman: The Dark Knight</strong>
+                                <div class="text-muted small">Chapter 12</div>
+                            </div>
+                            <span class="badge bg-primary">75%</span>
+                        </div>
+                        
+                        <div class="progress-item">
+                            <div>
+                                <strong>Wonder Woman: Warbringer</strong>
+                                <div class="text-muted small">Chapter 8</div>
+                            </div>
+                            <span class="badge bg-warning">45%</span>
+                        </div>
+                        
+                        <div class="progress-item">
+                            <div>
+                                <strong>The Flash: Rebirth</strong>
+                                <div class="text-muted small">Chapter 3</div>
+                            </div>
+                            <span class="badge bg-danger">20%</span>
+                        </div>
+                        
+                        <div class="progress-item">
+                            <div>
+                                <strong>Aquaman: Drowning World</strong>
+                                <div class="text-muted small">Chapter 15</div>
+                            </div>
+                            <span class="badge bg-success">90%</span>
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-outline-primary w-100 mt-3">
+                        <i class="fas fa-chart-bar me-2"></i>View All Progress
+                    </button>
+                </div>
+            </div>
+
+            <!-- Favorite Genres -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="fw-bold mb-0">
+                        <i class="fas fa-heart me-2"></i>Favorite Genres
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="favorite-genres">
+                        <div class="genre-badge">Superhero</div>
+                        <div class="genre-badge">Action</div>
+                        <div class="genre-badge">Adventure</div>
+                        <div class="genre-badge">Fantasy</div>
+                        <div class="genre-badge">Mystery</div>
+                        <div class="genre-badge">Sci-Fi</div>
+                    </div>
+                    
+                    <button class="btn btn-outline-primary w-100 mt-3">
+                        <i class="fas fa-edit me-2"></i>Edit Preferences
+                    </button>
+                </div>
+            </div>
+
+            <!-- Recent Activity -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="fw-bold mb-0">
+                        <i class="fas fa-history me-2"></i>Recent Activity
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="recent-activity">
+                        <div class="activity-item">
+                            <div class="d-flex align-items-center">
+                                <div class="activity-icon bg-success text-white me-3">
+                                    <i class="fas fa-check"></i>
+                                </div>
+                                <div>
+                                    <strong>Completed "Batman: Year One"</strong>
+                                    <div class="text-muted small">2 hours ago</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="activity-item">
+                            <div class="d-flex align-items-center">
+                                <div class="activity-icon bg-primary text-white me-3">
+                                    <i class="fas fa-star"></i>
+                                </div>
+                                <div>
+                                    <strong>Rated "The Flash" 5 stars</strong>
+                                    <div class="text-muted small">5 hours ago</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="activity-item">
+                            <div class="d-flex align-items-center">
+                                <div class="activity-icon bg-info text-white me-3">
+                                    <i class="fas fa-bookmark"></i>
+                                </div>
+                                <div>
+                                    <strong>Started reading "Wonder Woman"</strong>
+                                    <div class="text-muted small">1 day ago</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="activity-item">
+                            <div class="d-flex align-items-center">
+                                <div class="activity-icon bg-warning text-white me-3">
+                                    <i class="fas fa-upload"></i>
+                                </div>
+                                <div>
+                                    <strong>Uploaded 3 new comics</strong>
+                                    <div class="text-muted small">2 days ago</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function updateAvatar(event) {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('avatarImage').src = e.target.result;
+            // Here you would typically upload the file to the server
+            showNotification('Profile picture updated!', 'success');
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+// Form submissions
+document.getElementById('accountSettingsForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    // Here you would send the data to the server
+    showNotification('Account settings saved!', 'success');
+});
+
+document.getElementById('preferencesForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    // Here you would send the data to the server
+    showNotification('Reading preferences saved!', 'success');
+});
+
+document.getElementById('notificationsForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    // Here you would send the data to the server
+    showNotification('Notification settings saved!', 'success');
+});
+
+function showNotification(message, type) {
+    // Create a simple notification (in a real app, you'd use a proper notification system)
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 end-0 m-3`;
+    notification.style.zIndex = '9999';
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+}
+</script>
+{% endblock %}

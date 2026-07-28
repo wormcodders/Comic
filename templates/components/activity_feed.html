@@ -1,0 +1,371 @@
+<!-- Activity Feed Component -->
+{% macro activity_feed(activities=None, show_user=True) %}
+<div class="activity-feed" id="activity-feed">
+    <div class="activity-list" id="activity-list">
+        {% if activities %}
+            {% for activity in activities %}
+                {{ activity_item(activity, show_user) }}
+            {% endfor %}
+        {% else %}
+            <div class="activity-loading">
+                <i class="fas fa-spinner fa-spin"></i> Loading activity...
+            </div>
+        {% endif %}
+    </div>
+    
+    <div class="activity-load-more" id="activity-load-more" style="display: none;">
+        <button class="btn btn-secondary btn-sm" onclick="loadMoreActivity()">Load More</button>
+    </div>
+</div>
+
+{% macro activity_item(activity, show_user=True) %}
+<div class="activity-item" id="activity-{{ activity.id }}">
+    <div class="activity-icon">
+        <i class="{{ get_activity_icon(activity.activity_type) }}"></i>
+    </div>
+    <div class="activity-content">
+        {% if show_user and activity.user %}
+        <a href="/user/{{ activity.user.username }}" class="activity-user">
+            {{ activity.user.username }}
+        </a>
+        {% endif %}
+        <span class="activity-text">
+            {{ get_activity_text(activity) }}
+        </span>
+        {% if activity.comic %}
+        <a href="/comic/{{ activity.comic.id }}" class="activity-comic">
+            <img src="{{ activity.comic.cover_image or '/static/images/placeholder.png' }}" alt="" loading="lazy">
+            <span>{{ activity.comic.title }}</span>
+        </a>
+        {% endif %}
+        {% if activity.target_user %}
+        <a href="/user/{{ activity.target_user.username }}" class="activity-target-user">
+            {{ activity.target_user.username }}
+        </a>
+        {% endif %}
+        <span class="activity-time">{{ format_activity_time(activity.created_at) }}</span>
+    </div>
+</div>
+{% endmacro %}
+
+<style>
+.activity-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.activity-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.activity-item {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.2s;
+}
+
+.activity-item:hover {
+    background: var(--card-hover);
+}
+
+.activity-item:last-child {
+    border-bottom: none;
+}
+
+.activity-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.activity-icon i {
+    color: white;
+    font-size: 0.875rem;
+}
+
+.activity-icon.read { background: #3b82f6; }
+.activity-icon.favorite { background: #ef4444; }
+.activity-icon.rating { background: #f59e0b; }
+.activity-icon.comment { background: #10b981; }
+.activity-icon.follow { background: #8b5cf6; }
+.activity-icon.list_create { background: #06b6d4; }
+.activity-icon.add_to_list { background: #14b8a6; }
+
+.activity-content {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    line-height: 1.5;
+}
+
+.activity-user {
+    font-weight: 600;
+    color: var(--text-color);
+    text-decoration: none;
+}
+
+.activity-user:hover {
+    color: var(--primary-color);
+}
+
+.activity-text {
+    color: var(--text-muted);
+}
+
+.activity-comic {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    color: var(--text-color);
+    background: var(--dark-bg);
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    margin: 0.25rem 0;
+}
+
+.activity-comic:hover {
+    background: var(--card-hover);
+}
+
+.activity-comic img {
+    width: 24px;
+    height: 32px;
+    object-fit: cover;
+    border-radius: 3px;
+}
+
+.activity-comic span {
+    font-size: 0.875rem;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.activity-target-user {
+    font-weight: 600;
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.activity-target-user:hover {
+    text-decoration: underline;
+}
+
+.activity-time {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    width: 100%;
+}
+
+.activity-loading {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+
+.activity-empty {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+
+.activity-empty i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.3;
+}
+
+.activity-load-more {
+    text-align: center;
+    padding: 1rem;
+}
+
+@media (max-width: 768px) {
+    .activity-item {
+        padding: 0.75rem;
+    }
+    
+    .activity-icon {
+        width: 32px;
+        height: 32px;
+    }
+    
+    .activity-comic span {
+        max-width: 100px;
+    }
+}
+</style>
+
+<script>
+// Activity state
+let activityPage = 1;
+let activityHasMore = false;
+let activityEndpoint = '/api/activity/global';
+
+function initActivityFeed(endpoint = '/api/activity/global', initialActivities = null) {
+    activityEndpoint = endpoint;
+    
+    if (initialActivities && initialActivities.length > 0) {
+        const container = document.getElementById('activity-list');
+        container.innerHTML = initialActivities.map(a => renderActivityItem(a)).join('');
+        activityPage = 1;
+        checkActivityHasMore();
+    } else {
+        loadActivity();
+    }
+}
+
+async function loadActivity() {
+    const container = document.getElementById('activity-list');
+    
+    try {
+        const response = await fetch(`${activityEndpoint}?page=${activityPage}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            if (data.activities.length === 0 && activityPage === 1) {
+                container.innerHTML = `
+                    <div class="activity-empty">
+                        <i class="fas fa-broadcast-tower"></i>
+                        <p>No activity yet</p>
+                    </div>
+                `;
+            } else {
+                if (activityPage === 1) {
+                    container.innerHTML = '';
+                }
+                
+                data.activities.forEach(activity => {
+                    container.innerHTML += renderActivityItem(activity);
+                });
+            }
+            
+            activityHasMore = data.current_page < data.pages;
+            document.getElementById('activity-load-more').style.display = activityHasMore ? 'block' : 'none';
+        }
+    } catch (error) {
+        console.error('Load activity error:', error);
+    }
+}
+
+function renderActivityItem(activity) {
+    const iconClass = getActivityIconClass(activity.activity_type);
+    const icon = getActivityIcon(activity.activity_type);
+    const text = getActivityText(activity);
+    
+    let comicHtml = '';
+    if (activity.comic) {
+        comicHtml = `
+            <a href="/comic/${activity.comic.id}" class="activity-comic">
+                <img src="${activity.comic.cover_image || '/static/images/placeholder.png'}" alt="" loading="lazy">
+                <span>${escapeHtml(activity.comic.title)}</span>
+            </a>
+        `;
+    }
+    
+    let targetUserHtml = '';
+    if (activity.target_user) {
+        targetUserHtml = `
+            <a href="/user/${activity.target_user.username}" class="activity-target-user">
+                ${escapeHtml(activity.target_user.username)}
+            </a>
+        `;
+    }
+    
+    return `
+        <div class="activity-item" id="activity-${activity.id}">
+            <div class="activity-icon ${iconClass}">
+                <i class="${icon}"></i>
+            </div>
+            <div class="activity-content">
+                ${activity.user ? `<a href="/user/${activity.user.username}" class="activity-user">${escapeHtml(activity.user.username)}</a>` : ''}
+                <span class="activity-text">${text}</span>
+                ${comicHtml}
+                ${targetUserHtml}
+                <span class="activity-time">${formatActivityTime(activity.created_at)}</span>
+            </div>
+        </div>
+    `;
+}
+
+function getActivityIconClass(type) {
+    const icons = {
+        'read': 'read',
+        'favorite': 'favorite',
+        'rating': 'rating',
+        'comment': 'comment',
+        'follow': 'follow',
+        'list_create': 'list_create',
+        'add_to_list': 'add_to_list'
+    };
+    return icons[type] || '';
+}
+
+function getActivityIcon(type) {
+    const icons = {
+        'read': 'fas fa-book-open',
+        'favorite': 'fas fa-heart',
+        'rating': 'fas fa-star',
+        'comment': 'fas fa-comment',
+        'follow': 'fas fa-user-plus',
+        'list_create': 'fas fa-list',
+        'add_to_list': 'fas fa-plus'
+    };
+    return icons[type] || 'fas fa-circle';
+}
+
+function getActivityText(activity) {
+    const texts = {
+        'read': 'started reading',
+        'favorite': 'favorited',
+        'rating': 'rated',
+        'comment': 'commented on',
+        'follow': 'started following',
+        'list_create': 'created a reading list',
+        'add_to_list': 'added to list'
+    };
+    return texts[activity.activity_type] || activity.activity_type;
+}
+
+function formatActivityTime(dateStr) {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diff = now - date;
+    
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+    
+    return date.toLocaleDateString();
+}
+
+function checkActivityHasMore() {
+    // This would be called after initial render to check if more pages exist
+}
+
+function loadMoreActivity() {
+    activityPage++;
+    loadActivity();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endmacro %}

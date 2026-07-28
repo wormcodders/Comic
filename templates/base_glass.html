@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- SEO Meta Tags -->
+    <title>{% block title %}ComicVault - Read Comics Online Free{% endblock %}</title>
+    <meta name="description" content="{% block meta_description %}ComicVault - Your ultimate destination for reading comics online. Discover thousands of comics, manga, and graphic novels. Free to read, anytime, anywhere.{% endblock %}">
+    <meta name="keywords" content="{% block meta_keywords %}comics, manga, graphic novels, read comics online, free comics, comic reader, digital comics{% endblock %}">
+    <meta name="author" content="ComicVault">
+    <meta name="robots" content="index, follow">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:title" content="{% block og_title %}ComicVault - Read Comics Online Free{% endblock %}">
+    <meta property="og:description" content="{% block og_description %}Discover thousands of comics, manga, and graphic novels. Free to read, anytime, anywhere.{% endblock %}">
+    <meta property="og:image" content="{% block og_image %}{{ url_for('static', filename='images/og-image.jpg', _external=True) }}{% endblock %}">
+    <meta property="og:site_name" content="ComicVault">
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="{{ request.url }}">
+    <meta property="twitter:title" content="{% block twitter_title %}ComicVault - Read Comics Online Free{% endblock %}">
+    <meta property="twitter:description" content="{% block twitter_description %}Discover thousands of comics, manga, and graphic novels. Free to read, anytime, anywhere.{% endblock %}">
+    <meta property="twitter:image" content="{% block twitter_image %}{{ url_for('static', filename='images/og-image.jpg', _external=True) }}{% endblock %}">
+    
+    <!-- Canonical URL -->
+    <link rel="canonical" href="{{ request.url }}">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    
+    <!-- Structured Data for SEO -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "ComicVault",
+        "url": "{{ url_for('main.home', _external=True) }}",
+        "description": "Your ultimate destination for reading comics online",
+        "potentialAction": {
+            "@type": "SearchAction",
+            "target": "{{ url_for('main.home', _external=True) }}?search={search_term}",
+            "query-input": "required name=search_term"
+        }
+    }
+    </script>
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="glass-scrollbar">
+    <!-- Animated Background Effects -->
+    <div class="aurora-bg"></div>
+    <div class="mesh-bg"></div>
+    <div class="noise-overlay"></div>
+    
+    <!-- Import Ad Components -->
+    {% from 'components/ad_placeholder.html' import ad_banner, ad_sidebar, ad_in_content, ad_native %}
+    
+    <!-- Header Ad - Hidden on admin pages -->
+    {% if not request.endpoint or not request.endpoint.startswith('admin') %}
+        {% if header_ad %}
+        <div class="ad-header text-center py-2">
+            {{ header_ad.ad_code|safe }}
+        </div>
+        {% else %}
+            {{ ad_banner('header') }}
+        {% endif %}
+    {% endif %}
+    
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top glass-navbar">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('main.home') }}">
+                <i class="fas fa-book-open me-2"></i>ComicVault
+            </a>
+            <button class="navbar-toggler glass-btn-ghost" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.home') }}">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.categories') }}">Categories</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.trending') }}">Trending</a>
+                    </li>
+                    {% if current_user.is_authenticated %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('main.library') }}">Library</a>
+                        </li>
+                    {% endif %}
+                </ul>
+                <ul class="navbar-nav">
+                    {% if current_user.is_authenticated %}
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                <i class="fas fa-user"></i> {{ current_user.username }}
+                            </a>
+                            <ul class="dropdown-menu glass-dropdown">
+                                <li><a class="dropdown-item glass-dropdown-item" href="{{ url_for('main.library') }}">My Library</a></li>
+                                {% if current_user.is_admin %}
+                                    <li><div class="glass-divider"></div></li>
+                                    <li><a class="dropdown-item glass-dropdown-item" href="{{ url_for('main.admin_dashboard') }}">Admin</a></li>
+                                {% endif %}
+                                <li><div class="glass-divider"></div></li>
+                                <li><a class="dropdown-item text-danger" href="{{ url_for('main.logout') }}">Logout</a></li>
+                            </ul>
+                        </li>
+                    {% else %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('main.login') }}">Login</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="glass-btn ms-2" href="{{ url_for('main.register') }}">Register</a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="container mt-3">
+                    <div class="flash-messages">
+                        {% for category, message in messages %}
+                        {% set alert_class = 'danger' if category == 'error' else category %}
+                        <div class="glass-card alert alert-{{ alert_class }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" onclick="this.parentElement.remove()">&times;</button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endwith %}
+        
+        {% block content %}{% endblock %}
+
+    <!-- Footer -->
+    <footer class="footer mt-auto py-4 glass-dark">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5 class="text-white">ComicVault</h5>
+                    <p class="text-white-50">Your digital comic collection manager</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <p class="text-white-50">&copy; 2024 ComicVault. All rights reserved.</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Footer Ad - Hidden on admin pages -->
+    {% if not request.endpoint or not request.endpoint.startswith('admin') %}
+        {{ ad_banner('footer') }}
+    {% endif %}
+
+    <!-- Bottom Navigation (Mobile) -->
+    <nav class="bottom-nav d-lg-none glass-bottom-nav">
+        <a href="{{ url_for('main.home') }}" class="bottom-nav-item {% if request.endpoint == 'main.home' %}active{% endif %}">
+            <i class="fas fa-home"></i>
+            <span>Home</span>
+        </a>
+        <a href="{{ url_for('main.categories') }}" class="bottom-nav-item {% if request.endpoint == 'main.categories' %}active{% endif %}">
+            <i class="fas fa-th-large"></i>
+            <span>Browse</span>
+        </a>
+        <a href="{{ url_for('main.trending') }}" class="bottom-nav-item {% if request.endpoint == 'main.trending' %}active{% endif %}">
+            <i class="fas fa-fire"></i>
+            <span>Trending</span>
+        </a>
+        {% if current_user.is_authenticated %}
+            <a href="{{ url_for('main.library') }}" class="bottom-nav-item {% if request.endpoint == 'main.library' %}active{% endif %}">
+                <i class="fas fa-bookmark"></i>
+                <span>Library</span>
+            </a>
+            <a href="{{ url_for('main.profile') }}" class="bottom-nav-item {% if request.endpoint == 'main.profile' %}active{% endif %}">
+                <i class="fas fa-user"></i>
+                <span>Profile</span>
+            </a>
+        {% else %}
+            <a href="{{ url_for('main.login') }}" class="bottom-nav-item {% if request.endpoint == 'main.login' %}active{% endif %}">
+                <i class="fas fa-user"></i>
+                <span>Login</span>
+            </a>
+        {% endif %}
+    </nav>
+
+    <!-- Scroll to Top Button -->
+    <button id="scrollToTop" class="glass-btn btn-icon position-fixed glass-float" style="bottom: 80px; right: 20px; z-index: 100; display: none; width: 48px; height: 48px; border-radius: 50%;">
+        <i class="fas fa-arrow-up"></i>
+    </button>
+
+    <!-- Toast Container -->
+    <div class="toast-container"></div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
