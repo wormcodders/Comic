@@ -13,17 +13,31 @@
     
     <!-- CSRF Fetch Interceptor -->
     <script>
-        document.addEventListener("DOMContentLoaded", function() {
-            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        (function() {
+            function getCsrfToken() {
+                const meta = document.querySelector('meta[name="csrf-token"]');
+                return meta ? meta.getAttribute('content') : '';
+            }
             const originalFetch = window.fetch;
             window.fetch = function(resource, config) {
-                if(config && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(config.method ? config.method.toUpperCase() : 'GET')) {
-                    config.headers = config.headers || {};
-                    config.headers['X-CSRFToken'] = csrfToken;
+                config = config || {};
+                const method = (config.method || 'GET').toUpperCase();
+                if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+                    const csrfToken = getCsrfToken();
+                    if (csrfToken) {
+                        if (config.headers instanceof Headers) {
+                            config.headers.set('X-CSRFToken', csrfToken);
+                        } else if (Array.isArray(config.headers)) {
+                            config.headers.push(['X-CSRFToken', csrfToken]);
+                        } else {
+                            config.headers = config.headers || {};
+                            config.headers['X-CSRFToken'] = csrfToken;
+                        }
+                    }
                 }
                 return originalFetch(resource, config);
             };
-        });
+        })();
     </script>
     <meta name="description" content="{% block meta_description %}ComicVault - Your ultimate destination for reading comics online. Discover thousands of comics, manga, and graphic novels. Free to read, anytime, anywhere.{% endblock %}">
     <meta name="keywords" content="{% block meta_keywords %}comics, manga, graphic novels, read comics online, free comics, comic reader, digital comics{% endblock %}">

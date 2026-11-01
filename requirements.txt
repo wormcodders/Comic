@@ -11,3 +11,6 @@ Flask-Limiter
 Flask-Talisman
 bleach
 flask_migrate
+pymupdf
+cryptography
+

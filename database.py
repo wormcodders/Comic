@@ -50,6 +50,8 @@ def init_default_settings():
         ('site_description', '', 'Site description'),
         ('items_per_page', '12', 'Number of items per page'),
         ('maintenance_mode', '0', 'Maintenance mode (0=off, 1=on)'),
+        ('cloud_storage_enabled', '0', 'Enable Catbox.moe cloud storage (0=off, 1=on)'),
+        ('catbox_userhash', '', 'Catbox.moe account userhash (optional)'),
     ]
     
     for key, value, description in defaults:

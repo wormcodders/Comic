@@ -60,7 +60,11 @@
                                 <div class="d-flex align-items-center p-3 bg-light rounded">
                                     <i class="fas fa-file-pdf fa-2x text-danger me-3"></i>
                                     <div>
-                                        <p class="mb-0 fw-bold">{{ comic.pdf_file }}</p>
+                                        {% if comic.pdf_url %}
+                                            <p class="mb-0 fw-bold"><a href="{{ comic.pdf_url }}" target="_blank" class="text-primary text-decoration-none">{{ comic.pdf_file }} <i class="fas fa-external-link-alt fa-xs ms-1"></i></a></p>
+                                        {% else %}
+                                            <p class="mb-0 fw-bold">{{ comic.pdf_file }}</p>
+                                        {% endif %}
                                         <small class="text-muted">Last updated: {{ comic.updated_at.strftime('%Y-%m-%d') }}</small>
                                     </div>
                                 </div>
@@ -77,6 +81,16 @@
                                     </div>
                                 </div>
                             </div>
+                            {% if comic.album_url %}
+                            <div class="col-12 mt-2">
+                                <div class="p-2 px-3 rounded bg-light d-flex align-items-center justify-content-between">
+                                    <span class="small text-muted"><i class="fas fa-images text-info me-2"></i>Catbox Cloud Album:</span>
+                                    <a href="{{ comic.album_url }}" target="_blank" class="btn btn-sm btn-outline-info">
+                                        <i class="fas fa-external-link-alt me-1"></i>Open Album on Catbox
+                                    </a>
+                                </div>
+                            </div>
+                            {% endif %}
                         </div>
 
                         <!-- File Replacements -->

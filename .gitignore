@@ -1,0 +1,58 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# Local uploaded media (preserve directory structure)
+static/uploads/comics/*
+static/uploads/covers/*
+static/uploads/pages/*
+!static/uploads/comics/.gitkeep
+!static/uploads/covers/.gitkeep
+!static/uploads/pages/.gitkeep
+
+# IDEs & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Scratch directory
+scratch/
+debug.json

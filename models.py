@@ -11,6 +11,7 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256))
+    security_answer_hash = db.Column(db.String(256))
     is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
@@ -26,6 +27,26 @@ class User(UserMixin, db.Model):
     def check_password(self, password):
         """Check password against hash"""
         return check_password_hash(self.password_hash, password)
+    
+    def set_security_answer(self, answer):
+        """Normalize and hash security answer using scrypt"""
+        if answer:
+            norm_answer = " ".join(str(answer).strip().lower().split())
+            self.security_answer_hash = generate_password_hash(norm_answer, method='scrypt')
+        else:
+            self.security_answer_hash = None
+            
+    def check_security_answer(self, answer):
+        """Verify security answer against scrypt hash"""
+        if not self.security_answer_hash or not answer:
+            return False
+        norm_answer = " ".join(str(answer).strip().lower().split())
+        return check_password_hash(self.security_answer_hash, norm_answer)
+    
+    @property
+    def avatar(self):
+        """Default user avatar path"""
+        return 'default-avatar.png'
     
     def __repr__(self):
         return f'<User {self.username}>'
@@ -71,6 +92,7 @@ class Comic(db.Model):
     description = db.Column(db.Text)
     cover_image = db.Column(db.String(500))
     pdf_file = db.Column(db.String(500))
+    album_url = db.Column(db.String(500))  # Catbox.moe Album URL (e.g. https://catbox.moe/c/xxxxxx)
     download_link = db.Column(db.String(1000))  # External download URL from upload host
     category = db.Column(db.String(50), default='General')
     language = db.Column(db.String(50), default='English')
@@ -86,6 +108,7 @@ class Comic(db.Model):
     # Relationships
     tags = db.relationship('ComicTag', backref='comic', lazy='dynamic', cascade='all, delete-orphan')
     chapters = db.relationship('Chapter', backref='comic', lazy='dynamic', cascade='all, delete-orphan')
+    pages = db.relationship('ComicPage', backref='comic', lazy='dynamic', cascade='all, delete-orphan', order_by='ComicPage.page_number')
     ratings = db.relationship('Rating', backref='comic', lazy='dynamic', cascade='all, delete-orphan')
     reading_progress = db.relationship('ReadingProgress', backref='comic', lazy='dynamic', cascade='all, delete-orphan')
     
@@ -98,6 +121,15 @@ class Comic(db.Model):
             return f'/static/uploads/covers/{self.cover_image}'
         # Return a high-quality placeholder if no cover exists
         return 'https://via.placeholder.com/300x450.png?text=No+Cover'
+
+    @property
+    def pdf_url(self):
+        """Return the URL for the comic PDF (cloud URL or local static URL)"""
+        if not self.pdf_file:
+            return None
+        if self.pdf_file.startswith(('http://', 'https://')):
+            return self.pdf_file
+        return f'/static/uploads/comics/{self.pdf_file}'
 
     def __repr__(self):
         return f'<Comic {self.title}>'
@@ -119,6 +151,7 @@ class Comic(db.Model):
             'cover_image': self.cover_image,
             'cover_url': self.cover_url,
             'pdf_file': self.pdf_file,
+            'album_url': self.album_url,
             'download_link': self.download_link,
             'category': self.category,
             'language': self.language,
@@ -144,6 +177,28 @@ class Chapter(db.Model):
     
     def __repr__(self):
         return f'<Chapter {self.chapter_number}: {self.title}>'
+
+
+class ComicPage(db.Model):
+    """Model for tracking comic pages (both local paths and cloud URLs)"""
+    __tablename__ = 'comic_page'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    comic_id = db.Column(db.Integer, db.ForeignKey('comic.id'), nullable=False)
+    chapter_id = db.Column(db.Integer, db.ForeignKey('chapter.id'), nullable=True)
+    page_number = db.Column(db.Integer, nullable=False)
+    image_url = db.Column(db.String(1000), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'page_number': self.page_number,
+            'url': self.image_url
+        }
+
+    def __repr__(self):
+        return f'<ComicPage {self.comic_id} - Page {self.page_number}>'
 
 
 
@@ -189,25 +244,45 @@ class Setting(db.Model):
     def __repr__(self):
         return f'<Setting {self.key}>'
     
+    def get_decrypted_value(self):
+        """Return the decrypted plaintext value if sensitive/encrypted"""
+        from crypto_utils import decrypt_val, is_sensitive_key
+        if is_sensitive_key(self.key) or (self.value and str(self.value).startswith('enc:')):
+            return decrypt_val(self.value)
+        return self.value
+
     @staticmethod
     def get(key, default=None):
-        """Get a setting value by key"""
+        """Get a setting value by key, automatically decrypting sensitive credentials"""
+        from crypto_utils import decrypt_val, is_sensitive_key
         setting = Setting.query.filter_by(key=key).first()
-        return setting.value if setting else default
+        if not setting or setting.value is None:
+            return default
+        if is_sensitive_key(key) or str(setting.value).startswith('enc:'):
+            return decrypt_val(setting.value)
+        return setting.value
     
     @staticmethod
     def set(key, value, description=None):
-        """Set a setting value"""
+        """Set a setting value, automatically encrypting sensitive credentials at rest"""
+        from crypto_utils import encrypt_val, is_sensitive_key
+        stored_value = encrypt_val(value) if (value and is_sensitive_key(key)) else value
+        
         setting = Setting.query.filter_by(key=key).first()
         if setting:
-            setting.value = value
+            setting.value = stored_value
             if description:
                 setting.description = description
         else:
-            setting = Setting(key=key, value=value, description=description)
+            setting = Setting(key=key, value=stored_value, description=description)
             db.session.add(setting)
         db.session.commit()
         return setting
+
+    @staticmethod
+    def get_all_dict():
+        """Return all settings as a dictionary with sensitive values decrypted for display"""
+        return {s.key: s.get_decrypted_value() for s in Setting.query.all()}
 
 
 class UserLibrary(db.Model):

@@ -49,7 +49,9 @@ class UnifiedUploader:
                  ai_api_key: str = None,
                  ai_model: str = None,
                  ai_base_url: str = None,
-                 use_local_llm: bool = False):
+                 use_local_llm: bool = False,
+                 cloud_storage_enabled: bool = False,
+                 catbox_userhash: str = None):
         """
         Initialize the unified uploader.
         
@@ -62,6 +64,8 @@ class UnifiedUploader:
             ai_model: AI model to use for vision analysis
             ai_base_url: Custom API base URL (e.g., http://localhost:11434/v1 for Ollama)
             use_local_llm: Set to True if using a local LLM like Ollama
+            cloud_storage_enabled: Set to True to stream directly to Catbox.moe (zero local files)
+            catbox_userhash: Optional account userhash for Catbox.moe
         """
         self.upload_folder = upload_folder or os.path.join('static', 'uploads', 'comics')
         self.covers_folder = covers_folder or os.path.join('static', 'uploads', 'covers')
@@ -71,8 +75,10 @@ class UnifiedUploader:
         self.ai_model = ai_model
         self.ai_base_url = ai_base_url
         self.use_local_llm = use_local_llm
+        self.cloud_storage_enabled = cloud_storage_enabled
+        self.catbox_userhash = catbox_userhash or ""
         
-        # Ensure directories exist
+        # Ensure directories exist (for local mode fallback)
         os.makedirs(self.upload_folder, exist_ok=True)
         os.makedirs(self.covers_folder, exist_ok=True)
         
@@ -127,8 +133,99 @@ class UnifiedUploader:
                 result['errors'].append('Invalid file type or size')
                 return result
             
+            # Read file bytes into memory
+            if hasattr(file_stream, 'read'):
+                if hasattr(file_stream, 'seek'):
+                    file_stream.seek(0)
+                pdf_bytes = file_stream.read()
+            else:
+                pdf_bytes = bytes(file_stream)
+                
+            if not pdf_bytes:
+                result['errors'].append('Uploaded file is empty')
+                return result
+
+            # Check if direct cloud upload to Catbox is enabled
+            if self.cloud_storage_enabled:
+                from catbox_service import CatboxService
+                catbox = CatboxService(userhash=self.catbox_userhash)
+                
+                base_name, ext = os.path.splitext(filename)
+                clean_base = secure_filename(base_name)
+                if not clean_base:
+                    clean_base = "comic"
+                clean_ext = ext.lower().strip() if ext else ".pdf"
+                if not clean_ext.startswith('.'):
+                    clean_ext = '.' + clean_ext
+                safe_filename = f"{clean_base}{clean_ext}"
+                unique_prefix = uuid.uuid4().hex[:8]
+                pdf_cloud_name = f"{unique_prefix}_{clean_base}{clean_ext}"
+                cover_cloud_name = f"cover_{unique_prefix}_{clean_base}.jpg"
+                
+                # Extract cover & sample pages directly in memory
+                sample_bytes_list = []
+                cover_bytes = None
+                if PYMUPDF_AVAILABLE:
+                    try:
+                        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                        if len(doc) > 0:
+                            # Render cover
+                            mat = fitz.Matrix(1.5, 1.5)
+                            cover_pix = doc[0].get_pixmap(matrix=mat)
+                            cover_bytes = cover_pix.tobytes("jpeg")
+                            sample_bytes_list.append(cover_bytes)
+                            
+                            # Render up to 2 more sample pages for vision LLM context
+                            for i in range(1, min(3, len(doc))):
+                                pix = doc[i].get_pixmap(matrix=mat)
+                                sample_bytes_list.append(pix.tobytes("jpeg"))
+                        doc.close()
+                    except Exception as e:
+                        result['errors'].append(f'In-memory sample extraction failed: {str(e)}')
+
+                # 1. Upload Cover directly to Catbox
+                if cover_bytes:
+                    cover_catbox_url = catbox.upload_file(cover_bytes, filename=cover_cloud_name)
+                    if cover_catbox_url:
+                        result['cover_path'] = cover_catbox_url
+                        result['cover_url'] = cover_catbox_url
+                    else:
+                        result['errors'].append('Failed to upload cover to Catbox')
+
+                # 2. Upload Raw PDF directly to Catbox
+                pdf_catbox_url = catbox.upload_file(pdf_bytes, filename=pdf_cloud_name)
+                if pdf_catbox_url:
+                    result['local_path'] = pdf_catbox_url  # holds the primary PDF reference URL
+                else:
+                    result['errors'].append('Failed to upload PDF to Catbox')
+
+                # Store raw PDF bytes in result for immediate in-memory page extraction by caller
+                result['pdf_bytes'] = pdf_bytes
+
+                # 3. Vision LLM analysis using in-memory sample images
+                if extract_metadata and sample_bytes_list:
+                    metadata = self._analyze_with_vision_llm(sample_bytes_list)
+                    if metadata:
+                        result['metadata'] = metadata
+                    else:
+                        result['errors'].append('Vision LLM analysis failed (non-critical)')
+
+                # 4. Upload to upfiles if requested
+                if upload_to_upfiles:
+                    upfiles_result = self._upload_to_upfiles(pdf_bytes, filename=safe_filename)
+                    if upfiles_result.get('success'):
+                        result['upfiles_url'] = upfiles_result.get('url')
+                    else:
+                        result['errors'].append(f"Upfiles upload failed: {upfiles_result.get('message', 'Unknown error')}")
+
+                has_cloud_pdf = result['local_path'] is not None
+                upfiles_ok = not upload_to_upfiles or result['upfiles_url'] is not None
+                result['success'] = has_cloud_pdf and upfiles_ok
+                return result
+
+            # --- LOCAL DISK FLOW (When Cloud Storage is Disabled) ---
             # Step 2: Save locally
-            local_path = self._save_locally(file_stream, filename)
+            local_path = self._save_locally(pdf_bytes, filename)
             if not local_path:
                 result['errors'].append('Failed to save file locally')
                 return result
@@ -249,10 +346,10 @@ class UnifiedUploader:
             return extracted_paths
 
     
-    def _analyze_with_vision_llm(self, image_paths: Union[str, List[str]]) -> Optional[Dict]:
+    def _analyze_with_vision_llm(self, image_inputs: Union[str, bytes, io.BytesIO, List[Any]]) -> Optional[Dict]:
         """Analyze images with Vision LLM to extract metadata."""
-        if isinstance(image_paths, str):
-            image_paths = [image_paths]
+        if not isinstance(image_inputs, list):
+            image_inputs = [image_inputs]
             
         # Skip if no AI configuration and not using local LLM
         if not self.use_local_llm and not self.ai_api_key:
@@ -261,9 +358,16 @@ class UnifiedUploader:
         try:
             # Read and encode all images
             encoded_images = []
-            for path in image_paths:
-                with open(path, 'rb') as f:
-                    encoded_images.append(base64.b64encode(f.read()).decode('utf-8'))
+            for item in image_inputs:
+                if isinstance(item, str):
+                    with open(item, 'rb') as f:
+                        encoded_images.append(base64.b64encode(f.read()).decode('utf-8'))
+                elif isinstance(item, (bytes, bytearray)):
+                    encoded_images.append(base64.b64encode(bytes(item)).decode('utf-8'))
+                elif hasattr(item, 'read'):
+                    if hasattr(item, 'seek'):
+                        item.seek(0)
+                    encoded_images.append(base64.b64encode(item.read()).decode('utf-8'))
             
             prompt = """Analyze these comic book images (cover and initial pages) and extract detailed metadata. 
 
@@ -401,8 +505,8 @@ Return the result as a JSON object with these exact keys:
             
             return None
     
-    def _upload_to_upfiles(self, file_path: str) -> Dict:
-        """Upload file to upfiles.com."""
+    def _upload_to_upfiles(self, file_input: Union[str, bytes], filename: Optional[str] = None) -> Dict:
+        """Upload file to upfiles.com (supports path, URL, or raw bytes)."""
         if not self.upfiles_api_key:
             return {'success': False, 'message': 'No upfiles API key configured'}
         
@@ -411,38 +515,62 @@ Return the result as a JSON object with these exact keys:
         
         for attempt in range(max_retries):
             try:
-                with open(file_path, 'rb') as f:
-                    files = {
-                        'token': (None, self.upfiles_api_key),
-                        'file': (os.path.basename(file_path), f, 'application/pdf')
-                    }
-                    
-                    headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                    }
-                    
-                    response = requests.post(
-                        self.upfiles_endpoint,
-                        files=files,
-                        headers=headers,
-                        timeout=300
-                    )
-                    response.raise_for_status()
-                    
-                    result = response.json()
-                    
-                    if result.get('status') == 'success':
-                        return {
-                            'success': True,
-                            'url': result.get('url'),
-                            'file_id': result.get('file_id')
-                        }
+                if isinstance(file_input, str):
+                    if file_input.startswith(('http://', 'https://')):
+                        from security_utils import is_safe_url
+                        if not is_safe_url(file_input):
+                            return {'success': False, 'message': 'Invalid or restricted remote URL'}
+                        from catbox_service import get_catbox_session
+                        session = get_catbox_session()
+                        resp = session.get(file_input, timeout=120)
+                        if resp.status_code == 200 and resp.content:
+                            file_bytes = resp.content
+                            fname = filename or os.path.basename(file_input.split('?')[0])
+                        else:
+                            return {'success': False, 'message': f'Failed to download file from URL ({resp.status_code})'}
                     else:
-                        # API error, don't necessarily retry unless it's a network thing
-                        return {
-                            'success': False,
-                            'message': result.get('message', 'Unknown error from upfiles')
-                        }
+                        fname = filename or os.path.basename(file_input)
+                        with open(file_input, 'rb') as f:
+                            file_bytes = f.read()
+                else:
+                    file_bytes = file_input
+                    fname = filename or "comic.pdf"
+                
+                if not fname.lower().endswith('.pdf'):
+                    fname += '.pdf'
+                
+                data = {'token': self.upfiles_api_key}
+                files = {
+                    'file': (fname, file_bytes, 'application/pdf')
+                }
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                }
+                
+                response = requests.post(
+                    self.upfiles_endpoint,
+                    data=data,
+                    files=files,
+                    headers=headers,
+                    timeout=300
+                )
+                response.raise_for_status()
+                
+                result = response.json()
+                
+                if result.get('status') == 'success':
+                    return {
+                        'success': True,
+                        'url': result.get('url'),
+                        'file_id': result.get('file_id')
+                    }
+                else:
+                    # API error, don't necessarily retry unless it's a network thing
+                    return {
+                        'success': False,
+                        'message': result.get('message', 'Unknown error from upfiles')
+                    }
                         
             except (requests.exceptions.RequestException, ConnectionResetError) as e:
                 if attempt < max_retries - 1:
@@ -455,39 +583,94 @@ Return the result as a JSON object with these exact keys:
         
         return {'success': False, 'message': 'Maximum retries exceeded'}
 
-    def extract_pages(self, pdf_path: str, comic_id: str) -> List[str]:
+    def extract_pages(self, pdf_input: Union[str, bytes, io.BytesIO], comic_id: str, upload_to_catbox: bool = False, catbox_userhash: Optional[str] = None) -> List[str]:
         """
         Extract all pages of a PDF as images.
+        Supports file path, URL, raw bytes, or BytesIO.
+        If upload_to_catbox is True, streams pages directly to Catbox and returns Catbox URLs without writing local files.
         """
         try:
             import fitz  # PyMuPDF
             
-            # Create a directory for this comic's pages
-            # self.covers_folder is static/uploads/covers
-            base_pages_dir = os.path.join(os.path.dirname(self.covers_folder), 'pages')
-            comic_pages_dir = os.path.join(base_pages_dir, str(comic_id))
-            os.makedirs(comic_pages_dir, exist_ok=True)
+            # Open doc from bytes, URL, or local path
+            if isinstance(pdf_input, (bytes, bytearray)):
+                doc = fitz.open(stream=bytes(pdf_input), filetype="pdf")
+            elif hasattr(pdf_input, 'read'):
+                if hasattr(pdf_input, 'seek'):
+                    pdf_input.seek(0)
+                data = pdf_input.read()
+                doc = fitz.open(stream=data, filetype="pdf")
+            elif isinstance(pdf_input, str):
+                if pdf_input.startswith(('http://', 'https://')):
+                    from security_utils import is_safe_url
+                    if not is_safe_url(pdf_input):
+                        print(f"[UnifiedUploader] SSRF Guard: Blocked unsafe PDF URL {pdf_input}")
+                        return []
+                    # Download from Catbox / HTTP to memory using pooled session with browser headers & retries
+                    from catbox_service import get_catbox_session
+                    session = get_catbox_session()
+                    doc = None
+                    for attempt in range(1, 4):
+                        try:
+                            resp = session.get(pdf_input, timeout=120)
+                            if resp.status_code == 200 and len(resp.content) > 0:
+                                doc = fitz.open(stream=resp.content, filetype="pdf")
+                                break
+                            else:
+                                print(f"[UnifiedUploader] Download attempt {attempt}/3 returned status {resp.status_code}")
+                        except Exception as e:
+                            print(f"[UnifiedUploader] Download attempt {attempt}/3 failed: {e}")
+                        import time
+                        time.sleep(1.0 * attempt)
+                    if not doc:
+                        print(f"[UnifiedUploader] Failed to fetch and parse PDF from URL: {pdf_input}")
+                        return []
+                else:
+                    doc = fitz.open(pdf_input)
+            else:
+                return []
             
-            doc = fitz.open(pdf_path)
             image_urls = []
             
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-                # Render page to image (2.0 zoom for better quality)
-                zoom = 2.0
-                mat = fitz.Matrix(zoom, zoom)
-                pix = page.get_pixmap(matrix=mat)
+            if upload_to_catbox:
+                from catbox_service import CatboxService
+                active_hash = catbox_userhash if catbox_userhash is not None else self.catbox_userhash
+                catbox = CatboxService(userhash=active_hash)
                 
-                image_name = f"page_{page_num + 1:03d}.jpg"
-                image_path = os.path.join(comic_pages_dir, image_name)
+                for page_num in range(len(doc)):
+                    if page_num > 0:
+                        import time
+                        time.sleep(0.3)  # Gentle pacing to avoid burst rate-limiting on Catbox
+                    page = doc.load_page(page_num)
+                    zoom = 2.0
+                    mat = fitz.Matrix(zoom, zoom)
+                    pix = page.get_pixmap(matrix=mat)
+                    img_bytes = pix.tobytes("jpeg")
+                    
+                    page_filename = f"comic_{comic_id}_page_{page_num + 1:03d}.jpg"
+                    page_url = catbox.upload_file(img_bytes, filename=page_filename)
+                    if page_url:
+                        image_urls.append(page_url)
+                    else:
+                        print(f"Failed to upload page {page_num + 1} to Catbox")
+            else:
+                base_pages_dir = os.path.join(os.path.dirname(self.covers_folder), 'pages')
+                comic_pages_dir = os.path.join(base_pages_dir, str(comic_id))
+                os.makedirs(comic_pages_dir, exist_ok=True)
                 
-                # Save as JPEG
-                pix.save(image_path)
-                
-                # Relative URL from static
-                rel_url = f"/static/uploads/pages/{comic_id}/{image_name}"
-                image_urls.append(rel_url)
-                
+                for page_num in range(len(doc)):
+                    page = doc.load_page(page_num)
+                    zoom = 2.0
+                    mat = fitz.Matrix(zoom, zoom)
+                    pix = page.get_pixmap(matrix=mat)
+                    
+                    image_name = f"page_{page_num + 1:03d}.jpg"
+                    image_path = os.path.join(comic_pages_dir, image_name)
+                    pix.save(image_path)
+                    
+                    rel_url = f"/static/uploads/pages/{comic_id}/{image_name}"
+                    image_urls.append(rel_url)
+            
             doc.close()
             return image_urls
         except Exception as e:
@@ -509,6 +692,8 @@ def create_uploader_from_config(config: Dict) -> UnifiedUploader:
             - AI_MODEL
             - AI_BASE_URL
             - USE_LOCAL_LLM
+            - CLOUD_STORAGE_ENABLED
+            - CATBOX_USERHASH
             
     Returns:
         Configured UnifiedUploader instance
@@ -521,5 +706,7 @@ def create_uploader_from_config(config: Dict) -> UnifiedUploader:
         ai_api_key=config.get('AI_API_KEY'),
         ai_model=config.get('AI_MODEL'),
         ai_base_url=config.get('AI_BASE_URL'),
-        use_local_llm=config.get('USE_LOCAL_LLM', False)
+        use_local_llm=config.get('USE_LOCAL_LLM', False),
+        cloud_storage_enabled=config.get('CLOUD_STORAGE_ENABLED', False),
+        catbox_userhash=config.get('CATBOX_USERHASH', '')
     )

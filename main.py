@@ -72,6 +72,18 @@ def create_app(config_class=Config):
     with app.app_context():
         db.create_all()
         
+        # Ensure security_answer_hash column exists in SQLite user table
+        try:
+            with db.engine.connect() as conn:
+                from sqlalchemy import text
+                result = conn.execute(text("PRAGMA table_info(user)")).fetchall()
+                cols = [row[1] for row in result]
+                if 'security_answer_hash' not in cols:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN security_answer_hash VARCHAR(256)"))
+                    conn.commit()
+        except Exception as e:
+            pass
+        
         # Create default admin user if not exists
         admin_email = 'admin@comicvault.app'
         admin_user = User.query.filter((User.email == admin_email) | (User.username == 'admin')).first()
@@ -83,10 +95,14 @@ def create_app(config_class=Config):
                 is_admin=True
             )
             admin.set_password('admin123')
+            admin.set_security_answer('Batman')
             db.session.add(admin)
             db.session.commit()
             print(f"OK Default admin user created ({admin_email} / admin123)")
         else:
+            if not admin_user.security_answer_hash:
+                admin_user.set_security_answer('Batman')
+                db.session.commit()
             print(f"i Admin user already exists: {admin_user.username} ({admin_user.email})")
         
         # Create default categories if empty

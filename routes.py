@@ -6,7 +6,7 @@ Main application routes and API endpoints
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, send_from_directory, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.utils import secure_filename
-from models import db, User, Comic, Category, Tag, ComicTag, ReadingProgress, Rating, UserLibrary, Setting, Ad, Chapter, Comment, CommentLike, ReadingList, ReadingListItem, Activity, Follow
+from models import db, User, Comic, Category, Tag, ComicTag, ReadingProgress, Rating, UserLibrary, Setting, Ad, Chapter, Comment, CommentLike, ReadingList, ReadingListItem, Activity, Follow, ComicPage
 from datetime import datetime
 import os
 import uuid
@@ -14,8 +14,18 @@ import shutil
 import bleach
 from extensions import limiter
 
-# Import unified uploader
+# Import unified uploader & cloud storage service
 from unified_uploader import UnifiedUploader, create_uploader_from_config
+from catbox_service import CatboxService
+
+# Helper to preserve cloud URLs vs local basenames
+def format_storage_ref(val):
+    if not val:
+        return None
+    val_str = str(val).strip()
+    if val_str.startswith(('http://', 'https://')):
+        return val_str
+    return os.path.basename(val_str)
 
 # Create Blueprint
 main = Blueprint('main', __name__)
@@ -65,41 +75,163 @@ def login():
 
 
 @main.route('/register', methods=['GET', 'POST'])
-@limiter.limit("5 per hour")
+@limiter.limit("10 per hour")
 def register():
     """User registration page and handler"""
     if current_user.is_authenticated:
         return redirect(url_for('main.home'))
     
     if request.method == 'POST':
-        username = request.form.get('username')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        confirm_password = request.form.get('confirm_password')
+        username = (request.form.get('username') or '').strip()
+        email = (request.form.get('email') or '').strip()
+        password = request.form.get('password') or ''
+        confirm_password = request.form.get('confirm_password') or ''
+        security_answer = request.form.get('security_answer') or ''
         
-        # Validation
+        # Validation using strict regex & fixed length helpers
+        from security_utils import (
+            validate_username,
+            validate_email,
+            validate_password,
+            validate_security_answer
+        )
+        
+        valid_u, msg_u = validate_username(username)
+        if not valid_u:
+            flash(msg_u, 'danger')
+            return render_template('auth/register.html')
+            
+        valid_e, msg_e = validate_email(email)
+        if not valid_e:
+            flash(msg_e, 'danger')
+            return render_template('auth/register.html')
+            
+        valid_p, msg_p = validate_password(password)
+        if not valid_p:
+            flash(msg_p, 'danger')
+            return render_template('auth/register.html')
+            
         if password != confirm_password:
-            flash('Passwords do not match', 'danger')
+            flash('Passwords do not match.', 'danger')
+            return render_template('auth/register.html')
+            
+        valid_s, msg_s = validate_security_answer(security_answer)
+        if not valid_s:
+            flash(msg_s, 'danger')
+            return render_template('auth/register.html')
+            
+        # 18+ Confirmation Check
+        if not request.form.get('age_confirm'):
+            flash('You must confirm that you are 18+ to create an account.', 'danger')
             return render_template('auth/register.html')
         
-        if User.query.filter_by(username=username).first():
-            flash('Username already taken', 'danger')
+        if User.query.filter(db.func.lower(User.username) == username.lower()).first():
+            flash('Username is already taken.', 'danger')
             return render_template('auth/register.html')
         
-        if User.query.filter_by(email=email).first():
-            flash('Email already registered', 'danger')
+        if User.query.filter(db.func.lower(User.email) == email.lower()).first():
+            flash('Email is already registered.', 'danger')
             return render_template('auth/register.html')
         
         # Create user
         user = User(username=username, email=email)
         user.set_password(password)
+        user.set_security_answer(security_answer)
         db.session.add(user)
         db.session.commit()
         
-        flash('Account created successfully! Please login.', 'success')
+        flash('Account created successfully! Please log in.', 'success')
         return redirect(url_for('main.login'))
     
     return render_template('auth/register.html')
+
+
+@main.route('/forgot-password', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
+def forgot_password():
+    """Step 1 of password recovery: Verify email and childhood favourite TV show"""
+    if current_user.is_authenticated:
+        return redirect(url_for('main.home'))
+        
+    if request.method == 'POST':
+        email = (request.form.get('email') or '').strip()
+        security_answer = request.form.get('security_answer') or ''
+        
+        from security_utils import validate_email, validate_security_answer
+        valid_e, msg_e = validate_email(email)
+        if not valid_e:
+            flash(msg_e, 'danger')
+            return render_template('auth/forgot_password.html')
+            
+        valid_s, msg_s = validate_security_answer(security_answer)
+        if not valid_s:
+            flash(msg_s, 'danger')
+            return render_template('auth/forgot_password.html')
+            
+        user = User.query.filter(db.func.lower(User.email) == email.lower()).first()
+        if user and user.check_security_answer(security_answer):
+            from itsdangerous import URLSafeTimedSerializer
+            import hashlib
+            serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
+            pw_sig = hashlib.sha256((user.password_hash or '').encode()).hexdigest()[:16]
+            token = serializer.dumps({'user_id': user.id, 'pw_sig': pw_sig}, salt='pw-reset-salt')
+            return redirect(url_for('main.reset_password', token=token))
+        else:
+            flash('Invalid email or security answer. Please check your details and try again.', 'danger')
+            return render_template('auth/forgot_password.html')
+            
+    return render_template('auth/forgot_password.html')
+
+
+@main.route('/reset-password', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
+def reset_password():
+    """Step 2 of password recovery: Set new password with valid token"""
+    if current_user.is_authenticated:
+        return redirect(url_for('main.home'))
+        
+    token = request.args.get('token') or request.form.get('token')
+    if not token:
+        flash('Missing password reset token. Please request a new link.', 'danger')
+        return redirect(url_for('main.forgot_password'))
+        
+    from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
+    serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
+    
+    try:
+        data = serializer.loads(token, salt='pw-reset-salt', max_age=900)  # 15 minutes expiry
+        user_id = data.get('user_id')
+        user = User.query.get(user_id)
+        import hashlib
+        current_sig = hashlib.sha256((user.password_hash or '').encode()).hexdigest()[:16] if user else ''
+        if not user or current_sig != data.get('pw_sig'):
+            flash('This password reset link has expired or has already been used.', 'warning')
+            return redirect(url_for('main.forgot_password'))
+    except (SignatureExpired, BadSignature, Exception):
+        flash('This password reset link is invalid or has expired. Please request a new link.', 'danger')
+        return redirect(url_for('main.forgot_password'))
+        
+    if request.method == 'POST':
+        password = request.form.get('password') or ''
+        confirm_password = request.form.get('confirm_password') or ''
+        
+        from security_utils import validate_password
+        valid_p, msg_p = validate_password(password)
+        if not valid_p:
+            flash(msg_p, 'danger')
+            return render_template('auth/reset_password.html', token=token)
+            
+        if password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return render_template('auth/reset_password.html', token=token)
+            
+        user.set_password(password)
+        db.session.commit()
+        
+        flash('Password reset successful! Please log in with your new password.', 'success')
+        return redirect(url_for('main.login'))
+        
+    return render_template('auth/reset_password.html', token=token)
 
 
 @main.route('/logout')
@@ -517,6 +649,7 @@ def read_comic(comic_id):
 
 
 @main.route('/api/comic/<int:comic_id>/pages')
+@limiter.limit("60 per minute")
 def api_comic_pages(comic_id):
     """API endpoint to get comic pages (extracted images)"""
     comic = Comic.query.get_or_404(comic_id)
@@ -524,33 +657,78 @@ def api_comic_pages(comic_id):
     if not comic.pdf_file:
         return jsonify({'success': False, 'message': 'No file available'}), 404
     
-    # Check if images are already extracted
+    # 1. Check if ComicPage records exist in database
+    db_pages = ComicPage.query.filter_by(comic_id=comic.id).order_by(ComicPage.page_number.asc()).all()
+    if db_pages:
+        return jsonify({
+            'success': True,
+            'comic_id': comic.id,
+            'type': 'images',
+            'pages': [{'url': p.image_url} for p in db_pages],
+            'total': len(db_pages)
+        })
+
+    # 2. Check if images are already extracted locally on disk
     pages_dir = os.path.join(current_app.static_folder, 'uploads', 'pages', str(comic.id))
-    
     image_files = []
     if os.path.exists(pages_dir):
-        image_files = [f for f in os.listdir(pages_dir) if f.endswith('.jpg')]
-        image_files.sort()
+        image_files = sorted([f for f in os.listdir(pages_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
     
-    if not image_files:
-        # Extract pages now
-        pdf_path = os.path.join(current_app.static_folder, 'uploads', 'comics', comic.pdf_file)
-        
-        config_dict = {
-            'COVERS_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'covers')
-        }
-        uploader = create_uploader_from_config(config_dict)
-        
-        urls = uploader.extract_pages(pdf_path, str(comic.id))
-        pages = [{'url': url} for url in urls]
-    else:
+    if image_files:
         pages = [{'url': f'/static/uploads/pages/{comic.id}/{f}'} for f in image_files]
+        return jsonify({
+            'success': True,
+            'comic_id': comic.id,
+            'type': 'images',
+            'pages': pages,
+            'total': len(pages)
+        })
+
+    # 3. Extract pages on demand
+    cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
+    userhash = Setting.get('catbox_userhash', '')
     
+    config_dict = {
+        'UPLOAD_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'comics'),
+        'COVERS_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'covers'),
+        'CLOUD_STORAGE_ENABLED': cloud_enabled,
+        'CATBOX_USERHASH': userhash
+    }
+    uploader = create_uploader_from_config(config_dict)
+    
+    # comic.pdf_file can be a local filename or an absolute cloud URL
+    if comic.pdf_file.startswith(('http://', 'https://')):
+        from security_utils import is_safe_url
+        if not is_safe_url(comic.pdf_file):
+            return jsonify({'success': False, 'message': 'Invalid comic file URL'}), 400
+        source_pdf = comic.pdf_file
+    else:
+        from security_utils import safe_join_path
+        comics_dir = os.path.join(current_app.static_folder, 'uploads', 'comics')
+        source_pdf = safe_join_path(comics_dir, comic.pdf_file)
+        if not source_pdf or not os.path.exists(source_pdf):
+            return jsonify({'success': False, 'message': 'Comic file not found on server'}), 404
+
+    urls = uploader.extract_pages(
+        pdf_input=source_pdf,
+        comic_id=str(comic.id),
+        upload_to_catbox=cloud_enabled,
+        catbox_userhash=userhash
+    )
+
+    if cloud_enabled and urls:
+        # Save to ComicPage database table for instant future retrieval
+        for idx, u in enumerate(urls):
+            db.session.add(ComicPage(comic_id=comic.id, page_number=idx + 1, image_url=u))
+        db.session.commit()
+
+    pages = [{'url': url} for url in urls]
     return jsonify({
         'success': True,
         'comic_id': comic.id,
         'type': 'images',
-        'pages': pages
+        'pages': pages,
+        'total': len(pages)
     })
 
 
@@ -736,6 +914,9 @@ def admin_dashboard():
     if not current_user.is_admin:
         return redirect(url_for('main.home'))
     
+    if current_user.check_password('admin123'):
+        flash('SECURITY WARNING: Your account is currently using the default password ("admin123"). Please change it immediately to secure your server.', 'danger')
+    
     avg_rating = db.session.query(db.func.avg(Rating.score)).scalar() or 0.0
     
     stats = {
@@ -915,8 +1096,8 @@ def admin_comic_create():
             category=category_name,
             language=request.form.get('language', 'English'),
             visibility=request.form.get('visibility', 'public'),
-            pdf_file=request.form.get('local_path'),
-            cover_image=request.form.get('cover_path'),
+            pdf_file=format_storage_ref(request.form.get('local_path')),
+            cover_image=format_storage_ref(request.form.get('cover_path')),
             download_link=request.form.get('download_link'),
             uploader_id=current_user.id
         )
@@ -925,12 +1106,18 @@ def admin_comic_create():
         if 'cover' in request.files:
             file = request.files['cover']
             if file and file.filename:
-                from werkzeug.utils import secure_filename
-                import uuid
-                filename = secure_filename(file.filename)
-                unique_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
-                file.save(os.path.join(current_app.static_folder, 'uploads', 'covers', unique_filename))
-                comic.cover_image = unique_filename
+                cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
+                userhash = Setting.get('catbox_userhash', '')
+                if cloud_enabled:
+                    service = CatboxService(userhash=userhash)
+                    cover_cloud_url = service.upload_file(file.read(), filename=f"cover_{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}")
+                    if cover_cloud_url:
+                        comic.cover_image = cover_cloud_url
+                else:
+                    filename = secure_filename(file.filename)
+                    unique_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
+                    file.save(os.path.join(current_app.static_folder, 'uploads', 'covers', unique_filename))
+                    comic.cover_image = unique_filename
         
         db.session.add(comic)
         db.session.commit()
@@ -945,16 +1132,52 @@ def admin_comic_create():
         
         # Proactively extract pages immediately after posting
         if comic.pdf_file:
-            pdf_path = os.path.join(current_app.static_folder, 'uploads', 'comics', comic.pdf_file)
-            if os.path.exists(pdf_path):
-                try:
-                    config_dict = {
-                        'COVERS_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'covers')
-                    }
-                    uploader = create_uploader_from_config(config_dict)
-                    uploader.extract_pages(pdf_path, str(comic.id))
-                except Exception as e:
-                    print(f"Proactive extraction failed: {str(e)}")
+            cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
+            userhash = Setting.get('catbox_userhash', '')
+            try:
+                config_dict = {
+                    'COVERS_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'covers'),
+                    'CLOUD_STORAGE_ENABLED': cloud_enabled,
+                    'CATBOX_USERHASH': userhash
+                }
+                uploader = create_uploader_from_config(config_dict)
+                
+                if comic.pdf_file.startswith(('http://', 'https://')):
+                    pdf_input = comic.pdf_file
+                else:
+                    pdf_input = os.path.join(current_app.static_folder, 'uploads', 'comics', comic.pdf_file)
+                
+                # Check if pages are already in ComicPage or need extracting
+                existing_pages = ComicPage.query.filter_by(comic_id=comic.id).count()
+                if existing_pages == 0:
+                    page_urls = uploader.extract_pages(
+                        pdf_input=pdf_input,
+                        comic_id=str(comic.id),
+                        upload_to_catbox=cloud_enabled,
+                        catbox_userhash=userhash
+                    )
+                    if cloud_enabled and page_urls:
+                        for idx, purl in enumerate(page_urls):
+                            db.session.add(ComicPage(comic_id=comic.id, page_number=idx + 1, image_url=purl))
+                        db.session.commit()
+                        
+                        # Create Catbox Album grouping all comic files together
+                        if userhash:
+                            try:
+                                album_files = [comic.pdf_file, comic.cover_image] + page_urls
+                                catbox_svc = CatboxService(userhash=userhash)
+                                album_url = catbox_svc.create_album(
+                                    title=comic.title,
+                                    files=album_files,
+                                    desc=f"{comic.title} by {comic.author or 'Unknown'}"
+                                )
+                                if album_url:
+                                    comic.album_url = album_url
+                                    db.session.commit()
+                            except Exception as album_err:
+                                print(f"Catbox album creation error: {album_err}")
+            except Exception as e:
+                print(f"Proactive extraction failed: {str(e)}")
         
         flash('Comic created successfully and pages extracted!', 'success')
         return redirect(url_for('main.admin_comics'))
@@ -1011,10 +1234,18 @@ def admin_comic_edit(id):
         if 'cover' in request.files:
             file = request.files['cover']
             if file and allowed_file(file.filename):
-                filename = secure_filename(file.filename)
-                unique_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
-                file.save(os.path.join(current_app.static_folder, 'uploads', 'covers', unique_filename))
-                comic.cover_image = unique_filename
+                cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
+                userhash = Setting.get('catbox_userhash', '')
+                if cloud_enabled:
+                    service = CatboxService(userhash=userhash)
+                    cover_cloud_url = service.upload_file(file.read(), filename=f"cover_{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}")
+                    if cover_cloud_url:
+                        comic.cover_image = cover_cloud_url
+                else:
+                    filename = secure_filename(file.filename)
+                    unique_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
+                    file.save(os.path.join(current_app.static_folder, 'uploads', 'covers', unique_filename))
+                    comic.cover_image = unique_filename
         
         db.session.commit()
         flash('Comic updated successfully!', 'success')
@@ -1032,6 +1263,14 @@ def admin_comic_delete(id):
         return redirect(url_for('main.home'))
     
     comic = Comic.query.get_or_404(id)
+    if comic.album_url and Setting.get('cloud_storage_enabled') == '1':
+        userhash = Setting.get('catbox_userhash', '')
+        if userhash:
+            try:
+                catbox_svc = CatboxService(userhash=userhash)
+                catbox_svc.delete_album(comic.album_url)
+            except Exception:
+                pass
     db.session.delete(comic)
     db.session.commit()
     flash('Comic deleted successfully!', 'success')
@@ -1328,20 +1567,138 @@ def admin_settings():
             Setting.set('upfiles_token', request.form.get('upfiles_token', ''), 'UpFiles API token')
             flash('Upload Configuration saved!', 'success')
             
+        elif section == 'catbox':
+            Setting.set('cloud_storage_enabled', '1' if request.form.get('cloud_storage_enabled') else '0', 'Enable Catbox cloud storage')
+            Setting.set('catbox_userhash', request.form.get('catbox_userhash', '').strip(), 'Catbox account userhash')
+            flash('Cloud Storage (Catbox.moe) settings saved!', 'success')
+            
         elif section == 'site':
             Setting.set('site_name', request.form.get('site_name', 'ComicVault'), 'Site name')
             flash('Site Settings saved!', 'success')
             
         return redirect(url_for('main.admin_settings'))
     
-    # Load all settings into a dict
-    settings = {s.key: s.value for s in Setting.query.all()}
+    # Load all settings into a dict with sensitive values decrypted for display
+    settings = Setting.get_all_dict()
     return render_template('admin/settings.html', settings=settings)
 
 
 # ============================
 # Admin Tools & API
 # ============================
+
+@main.route('/admin/test_catbox', methods=['POST'])
+@login_required
+def admin_test_catbox():
+    """Test Catbox.moe API connection and validate userhash"""
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+    
+    userhash = Setting.get('catbox_userhash', '')
+    if request.is_json:
+        data = request.get_json()
+        if data and 'catbox_userhash' in data:
+            userhash = data.get('catbox_userhash', '')
+            
+    service = CatboxService(userhash=userhash)
+    success, message = service.test_connection(userhash=userhash)
+    return jsonify({'success': success, 'message': message})
+
+
+@main.route('/admin/migrate_to_cloud', methods=['POST'])
+@login_required
+def admin_migrate_to_cloud():
+    """Migrate local comic assets (covers, PDFs, extracted pages) to Catbox.moe"""
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+    
+    userhash = Setting.get('catbox_userhash', '')
+    service = CatboxService(userhash=userhash)
+    
+    # Test connection first
+    ok, msg = service.test_connection()
+    if not ok:
+        return jsonify({'success': False, 'message': f'Cannot reach Catbox: {msg}'}), 400
+    
+    comics = Comic.query.all()
+    migrated_count = 0
+    covers_migrated = 0
+    pdfs_migrated = 0
+    pages_migrated = 0
+    errors = []
+    
+    for comic in comics:
+        try:
+            # 1. Migrate cover image
+            if comic.cover_image and not comic.cover_image.startswith(('http://', 'https://')):
+                local_cover = os.path.join(current_app.static_folder, 'uploads', 'covers', comic.cover_image)
+                if os.path.exists(local_cover):
+                    cloud_cover_url = service.upload_file(local_cover)
+                    if cloud_cover_url:
+                        comic.cover_image = cloud_cover_url
+                        covers_migrated += 1
+                        try:
+                            os.remove(local_cover)
+                        except Exception:
+                            pass
+            
+            # 2. Migrate raw comic PDF
+            if comic.pdf_file and not comic.pdf_file.startswith(('http://', 'https://')):
+                local_pdf = os.path.join(current_app.static_folder, 'uploads', 'comics', comic.pdf_file)
+                if os.path.exists(local_pdf):
+                    cloud_pdf_url = service.upload_file(local_pdf)
+                    if cloud_pdf_url:
+                        comic.pdf_file = cloud_pdf_url
+                        pdfs_migrated += 1
+                        try:
+                            os.remove(local_pdf)
+                        except Exception:
+                            pass
+            
+            # 3. Migrate extracted pages
+            local_pages_dir = os.path.join(current_app.static_folder, 'uploads', 'pages', str(comic.id))
+            if os.path.exists(local_pages_dir):
+                page_files = sorted([f for f in os.listdir(local_pages_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
+                if page_files:
+                    # Clean existing ComicPage rows for this comic
+                    ComicPage.query.filter_by(comic_id=comic.id).delete()
+                    
+                    for idx, pf in enumerate(page_files):
+                        if idx > 0:
+                            import time
+                            time.sleep(0.3)  # Gentle pacing to avoid burst rate-limiting
+                        page_path = os.path.join(local_pages_dir, pf)
+                        page_cloud_url = service.upload_file(page_path)
+                        if page_cloud_url:
+                            db.session.add(ComicPage(comic_id=comic.id, page_number=idx + 1, image_url=page_cloud_url))
+                            pages_migrated += 1
+                            try:
+                                os.remove(page_path)
+                            except Exception:
+                                pass
+                    try:
+                        os.rmdir(local_pages_dir)
+                    except Exception:
+                        pass
+            
+            db.session.commit()
+            migrated_count += 1
+        except Exception as e:
+            errors.append(f"Comic #{comic.id} ('{comic.title}'): {str(e)}")
+            db.session.rollback()
+            
+    return jsonify({
+        'success': True,
+        'message': f"Migration complete! Processed {migrated_count} comics ({covers_migrated} covers, {pdfs_migrated} PDFs, {pages_migrated} pages).",
+        'stats': {
+            'comics': migrated_count,
+            'covers': covers_migrated,
+            'pdfs': pdfs_migrated,
+            'pages': pages_migrated,
+            'errors': errors
+        }
+    })
+
 
 @main.route('/admin/test_llm', methods=['POST'])
 @login_required
@@ -1441,6 +1798,8 @@ def admin_unified_upload():
     
     try:
         # Load config for uploader
+        cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
+        userhash = Setting.get('catbox_userhash', '')
         config_dict = {
             'UPLOAD_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'comics'),
             'COVERS_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'covers'),
@@ -1449,7 +1808,9 @@ def admin_unified_upload():
             'AI_API_KEY': Setting.get('llm_api_key'),
             'AI_MODEL': Setting.get('llm_model', 'gpt-4-vision-preview'),
             'AI_BASE_URL': Setting.get('llm_base_url'),
-            'USE_LOCAL_LLM': Setting.get('llm_use_local') == '1'
+            'USE_LOCAL_LLM': Setting.get('llm_use_local') == '1',
+            'CLOUD_STORAGE_ENABLED': cloud_enabled,
+            'CATBOX_USERHASH': userhash
         }
         
         uploader = create_uploader_from_config(config_dict)
@@ -1473,8 +1834,8 @@ def admin_unified_upload():
                 'message': 'Comic processed successfully!',
                 'data': {
                     'metadata': metadata,
-                    'local_path': os.path.basename(result['local_path']),
-                    'cover_path': os.path.basename(result['cover_path']) if result.get('cover_path') else None,
+                    'local_path': format_storage_ref(result['local_path']),
+                    'cover_path': format_storage_ref(result.get('cover_path')),
                     'cover_url': result.get('cover_url'),
                     'upfiles_url': result.get('upfiles_url')
                 }
@@ -1489,36 +1850,49 @@ def admin_unified_upload():
 @main.route('/admin/upload_to_host', methods=['POST'])
 @login_required
 def admin_upload_to_host():
-    """Upload a locally stored file to UpFiles on demand"""
+    """Upload a locally stored or cloud-hosted file to UpFiles on demand"""
     if not current_user.is_admin:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     
-    data = request.get_json()
+    data = request.get_json() or {}
     local_filename = data.get('local_path')
     
     if not local_filename:
-        return jsonify({'success': False, 'message': 'No local path provided'}), 400
-    
-    # Secure the filename and build full path
-    from werkzeug.utils import secure_filename
-    safe_filename = secure_filename(local_filename)
-    local_path = os.path.join(current_app.static_folder, 'uploads', 'comics', safe_filename)
-    
-    if not os.path.exists(local_path):
-        # Try without securing if not found, but be careful
-        local_path = os.path.join(current_app.static_folder, 'uploads', 'comics', local_filename)
-        if not os.path.exists(local_path):
-            return jsonify({'success': False, 'message': f'File not found: {local_filename}'}), 404
+        return jsonify({'success': False, 'message': 'No local path or URL provided'}), 400
     
     try:
-        # Use UnifiedUploader for the actual upload logic
         config_dict = {
             'UPFILES_API_KEY': Setting.get('upfiles_token'),
             'UPFILES_ENDPOINT': Setting.get('upfiles_endpoint', 'https://api.upfiles.com/upload')
         }
         uploader = create_uploader_from_config(config_dict)
         
-        upfiles_result = uploader._upload_to_upfiles(local_path)
+        # Check if local_filename is an absolute cloud URL (e.g. Catbox)
+        if local_filename.startswith(('http://', 'https://')):
+            from security_utils import is_safe_url
+            if not is_safe_url(local_filename):
+                return jsonify({'success': False, 'message': 'Invalid or restricted remote URL'}), 400
+                
+            from catbox_service import get_catbox_session
+            session = get_catbox_session()
+            resp = session.get(local_filename, timeout=120)
+            if resp.status_code == 200 and resp.content:
+                fname = os.path.basename(local_filename.split('?')[0])
+                if not fname.lower().endswith('.pdf'):
+                    fname += '.pdf'
+                upfiles_result = uploader._upload_to_upfiles(resp.content, filename=fname)
+            else:
+                return jsonify({'success': False, 'message': f'Failed to retrieve file from cloud storage ({resp.status_code})'}), 400
+        else:
+            # Secure the filename and build full local path
+            from security_utils import safe_join_path
+            comics_dir = os.path.join(current_app.static_folder, 'uploads', 'comics')
+            local_path = safe_join_path(comics_dir, local_filename)
+            
+            if not local_path or not os.path.exists(local_path):
+                return jsonify({'success': False, 'message': f'File not found: {local_filename}'}), 404
+            
+            upfiles_result = uploader._upload_to_upfiles(local_path)
         
         if upfiles_result.get('success'):
             return jsonify({
@@ -1560,6 +1934,8 @@ def admin_bulk_upload_file():
         
     try:
         # Load config for uploader
+        cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
+        userhash = Setting.get('catbox_userhash', '')
         config_dict = {
             'UPLOAD_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'comics'),
             'COVERS_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'covers'),
@@ -1568,7 +1944,9 @@ def admin_bulk_upload_file():
             'AI_API_KEY': Setting.get('llm_api_key'),
             'AI_MODEL': Setting.get('llm_model', 'gpt-4-vision-preview'),
             'AI_BASE_URL': Setting.get('llm_base_url'),
-            'USE_LOCAL_LLM': Setting.get('llm_use_local') == '1'
+            'USE_LOCAL_LLM': Setting.get('llm_use_local') == '1',
+            'CLOUD_STORAGE_ENABLED': cloud_enabled,
+            'CATBOX_USERHASH': userhash
         }
         
         uploader = create_uploader_from_config(config_dict)
@@ -1621,8 +1999,8 @@ def admin_bulk_upload_file():
             language=language,
             visibility='draft',
             is_published=False,
-            pdf_file=os.path.basename(result['local_path']),
-            cover_image=os.path.basename(result['cover_path']) if result.get('cover_path') else None,
+            pdf_file=format_storage_ref(result['local_path']),
+            cover_image=format_storage_ref(result.get('cover_path')),
             download_link=result.get('upfiles_url'),
             uploader_id=current_user.id
         )
@@ -1639,12 +2017,35 @@ def admin_bulk_upload_file():
             
         # Extract all pages
         if comic.pdf_file:
-            pdf_path = os.path.join(current_app.static_folder, 'uploads', 'comics', comic.pdf_file)
-            if os.path.exists(pdf_path):
-                try:
-                    uploader.extract_pages(pdf_path, str(comic.id))
-                except Exception as e:
-                    print(f"Page extraction failed: {str(e)}")
+            try:
+                pdf_input = result.get('pdf_bytes') or comic.pdf_file
+                page_urls = uploader.extract_pages(
+                    pdf_input=pdf_input,
+                    comic_id=str(comic.id),
+                    upload_to_catbox=cloud_enabled,
+                    catbox_userhash=userhash
+                )
+                if cloud_enabled and page_urls:
+                    for idx, purl in enumerate(page_urls):
+                        db.session.add(ComicPage(comic_id=comic.id, page_number=idx + 1, image_url=purl))
+                    db.session.commit()
+                    
+                    if userhash:
+                        try:
+                            album_files = [comic.pdf_file, comic.cover_image] + page_urls
+                            catbox_svc = CatboxService(userhash=userhash)
+                            album_url = catbox_svc.create_album(
+                                title=comic.title,
+                                files=album_files,
+                                desc=f"{comic.title} by {comic.author or 'Unknown'}"
+                            )
+                            if album_url:
+                                comic.album_url = album_url
+                                db.session.commit()
+                        except Exception as album_err:
+                            print(f"Catbox album creation error: {album_err}")
+            except Exception as e:
+                print(f"Page extraction failed: {str(e)}")
                     
         return jsonify({
             'success': True,
@@ -1664,6 +2065,7 @@ def admin_bulk_upload_file():
 
 @main.route('/api/bookmarks', methods=['POST'])
 @login_required
+@limiter.limit("30 per minute")
 def create_bookmark():
     """Create a new bookmark"""
     data = request.get_json(silent=True)
@@ -1673,7 +2075,8 @@ def create_bookmark():
     comic_id = data.get('comic_id')
     chapter_id = data.get('chapter_id')
     page_number = data.get('page_number')
-    note = data.get('note', '')
+    from security_utils import sanitize_plain_text
+    note = sanitize_plain_text(data.get('note', ''), max_length=255)
     
     if not all([comic_id, page_number]):
         return jsonify({'success': False, 'message': 'Missing required fields'}), 400
@@ -1890,6 +2293,7 @@ def get_prev_chapter(chapter_id):
 
 @main.route('/api/comics/<int:comic_id>/comments', methods=['POST'])
 @login_required
+@limiter.limit("20 per minute")
 def create_comment(comic_id):
     """Create a new comment on a comic"""
     data = request.get_json()
@@ -1897,13 +2301,18 @@ def create_comment(comic_id):
     if not data or not data.get('content'):
         return jsonify({'success': False, 'message': 'Content is required'}), 400
     
+    from security_utils import sanitize_plain_text
+    clean_content = sanitize_plain_text(data.get('content'), max_length=1000)
+    if not clean_content:
+        return jsonify({'success': False, 'message': 'Valid content is required'}), 400
+    
     # Validate comic exists
     comic = Comic.query.get_or_404(comic_id)
     
     comment = Comment(
         user_id=current_user.id,
         comic_id=comic_id,
-        content=data.get('content')[:1000],  # Limit content length
+        content=clean_content,
         chapter_id=data.get('chapter_id'),
         parent_id=data.get('parent_id'),
         is_spoiler=data.get('is_spoiler', False)
@@ -1931,6 +2340,7 @@ def create_comment(comic_id):
 
 @main.route('/api/comments/<int:comment_id>', methods=['PUT'])
 @login_required
+@limiter.limit("20 per minute")
 def update_comment(comment_id):
     """Update a comment"""
     comment = Comment.query.get_or_404(comment_id)
@@ -1939,9 +2349,13 @@ def update_comment(comment_id):
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     
     data = request.get_json()
-    if data.get('content'):
-        comment.content = data['content'][:1000]
-    if 'is_spoiler' in data:
+    if data and data.get('content'):
+        from security_utils import sanitize_plain_text
+        clean_content = sanitize_plain_text(data['content'], max_length=1000)
+        if not clean_content:
+            return jsonify({'success': False, 'message': 'Valid content is required'}), 400
+        comment.content = clean_content
+    if data and 'is_spoiler' in data:
         comment.is_spoiler = data['is_spoiler']
     
     comment.updated_at = datetime.utcnow()
@@ -2015,6 +2429,7 @@ def get_user_reading_lists():
 
 @main.route('/api/reading-lists', methods=['POST'])
 @login_required
+@limiter.limit("30 per minute")
 def create_reading_list():
     """Create a new reading list"""
     data = request.get_json()
@@ -2022,10 +2437,17 @@ def create_reading_list():
     if not data or not data.get('title'):
         return jsonify({'success': False, 'message': 'Title is required'}), 400
     
+    from security_utils import sanitize_plain_text
+    clean_title = sanitize_plain_text(data.get('title'), max_length=100)
+    if not clean_title:
+        return jsonify({'success': False, 'message': 'Valid title is required'}), 400
+    
+    clean_desc = sanitize_plain_text(data.get('description', ''), max_length=500)
+    
     reading_list = ReadingList(
         user_id=current_user.id,
-        title=data['title'][:100],
-        description=data.get('description', '')[:500],
+        title=clean_title,
+        description=clean_desc,
         is_public=data.get('is_public', True)
     )
     
