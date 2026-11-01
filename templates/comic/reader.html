@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+
+{% block title %}{{ comic.title }} - ComicVault Reader{% endblock %}
+
+{% block extra_css %}
+<style>
+    body {
+        background-color: #0f0f0f;
+        color: #e0e0e0;
+    }
+    
+    .reader-layout {
+        display: grid;
+        grid-template-columns: 280px 1fr 280px;
+        gap: 20px;
+        max-width: 1600px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    
+    /* Center Column - Reading Area */
+    .reading-area {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: #1a1a1a;
+        box-shadow: 0 0 30px rgba(0,0,0,0.5);
+        border-radius: 8px;
+        min-height: 100vh;
+    }
+    
+    .comic-page-img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        margin-bottom: 2px;
+        background: #000;
+    }
+    
+    /* Sidebars */
+    .reader-sidebar {
+        position: sticky;
+        top: 80px;
+        height: fit-content;
+    }
+    
+    .sidebar-card {
+        background: rgba(9, 12, 17, 0.9) !important;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        color: #e6edf3;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+    
+    .sidebar-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 1.2rem;
+        padding-bottom: 0.8rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        color: var(--primary-color, #ff6b35);
+    }
+    
+    /* Author Comics List */
+    .author-comic-item {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 1rem;
+        text-decoration: none;
+        color: #e6edf3;
+        transition: transform 0.2s;
+    }
+    
+    .author-comic-item:hover {
+        transform: translateX(5px);
+        color: #fff;
+    }
+    
+    .author-comic-thumb {
+        width: 60px;
+        height: 80px;
+        object-fit: cover;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.1);
+    }
+    
+    .author-comic-info {
+        flex: 1;
+        overflow: hidden;
+    }
+    
+    .author-comic-title {
+        font-size: 0.9rem;
+        font-weight: 500;
+        margin-bottom: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    /* Tags & Categories */
+    .tag-cloud {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .reader-tag {
+        background: rgba(255, 255, 255, 0.1);
+        color: #e6edf3;
+        padding: 4px 10px;
+        border-radius: 15px;
+        font-size: 0.8rem;
+        text-decoration: none;
+        transition: all 0.2s;
+    }
+    
+    .reader-tag:hover {
+        background: var(--primary-color, #ff6b35);
+        color: #fff;
+    }
+    
+    .category-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    
+    .category-link {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 0;
+        color: #e6edf3;
+        text-decoration: none;
+        font-size: 0.9rem;
+    }
+    
+    .category-link:hover {
+        color: var(--primary-color, #ff6b35);
+    }
+    
+    /* Responsive */
+    @media (max-width: 1200px) {
+        .reader-layout {
+            grid-template-columns: 240px 1fr 240px;
+        }
+    }
+    
+    @media (max-width: 992px) {
+        .reader-layout {
+            grid-template-columns: 1fr;
+        }
+        
+        .reader-sidebar {
+            position: static;
+            order: 2;
+        }
+        
+        .reading-area {
+            order: 1;
+        }
+    }
+    
+    /* Loading Overlay */
+    #readerLoading {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.8);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="readerLoading">
+    <div class="spinner-border text-primary mb-3" role="status"></div>
+    <p>Loading comic reader...</p>
+</div>
+
+<div class="reader-layout">
+    <!-- Left Sidebar: Same Author -->
+    <aside class="reader-sidebar">
+        <div class="sidebar-card">
+            <h3 class="sidebar-title">More by {{ comic.author }}</h3>
+            {% if author_comics %}
+                {% for c in author_comics %}
+                <a href="{{ url_for('main.comic_detail', comic_id=c.id) }}" class="author-comic-item">
+                    <img src="{{ c.cover_url }}" class="author-comic-thumb" alt="{{ c.title }}">
+                    <div class="author-comic-info">
+                        <div class="author-comic-title">{{ c.title }}</div>
+                        <div class="text-muted small">★ {{ "%.1f"|format(c.average_rating) }}</div>
+                    </div>
+                </a>
+                {% endfor %}
+            {% else %}
+                <p class="text-muted small">No other comics by this author.</p>
+            {% endif %}
+        </div>
+    </aside>
+
+    <!-- Center: Main Reading Area -->
+    <main class="reading-area" id="readingArea">
+        <!-- Images will be injected here -->
+    </main>
+
+    <!-- Right Sidebar: Tags & Categories -->
+    <aside class="reader-sidebar">
+        <div class="sidebar-card">
+            <h3 class="sidebar-title">Popular Tags</h3>
+            <div class="tag-cloud">
+                {% for tag in popular_tags %}
+                <a href="#" class="reader-tag">#{{ tag.name }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="sidebar-card">
+            <h3 class="sidebar-title">Categories</h3>
+            <ul class="category-list">
+                {% for cat in categories %}
+                <li>
+                    <a href="{{ url_for('main.category_view', slug=cat.slug) }}" class="category-link">
+                        <i class="{{ cat.icon or 'fas fa-folder' }}"></i>
+                        {{ cat.name }}
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </aside>
+</div>
+
+<script>
+async function loadReader() {
+    const comicId = {{ comic.id }};
+    const loadingOverlay = document.getElementById('readerLoading');
+    const readingArea = document.getElementById('readingArea');
+    
+    try {
+        const response = await fetch(`/api/comic/${comicId}/pages`);
+        const result = await response.json();
+        
+        if (result.success && result.pages) {
+            readingArea.innerHTML = ''; // Clear
+            
+            result.pages.forEach((page, index) => {
+                const img = document.createElement('img');
+                img.src = page.url;
+                img.className = 'comic-page-img';
+                img.loading = 'lazy';
+                img.alt = `Page ${index + 1}`;
+                
+                // Add intersection observer for progress tracking
+                observer.observe(img);
+                
+                readingArea.appendChild(img);
+            });
+            
+            // Set total pages for progress calculation
+            totalPages = result.pages.length;
+            
+            loadingOverlay.style.display = 'none';
+        } else {
+            throw new Error(result.message || 'Failed to load pages');
+        }
+    } catch (error) {
+        console.error('Reader error:', error);
+        loadingOverlay.innerHTML = `
+            <div class="text-center p-4">
+                <i class="fas fa-exclamation-circle fa-3x text-danger mb-3"></i>
+                <p>Error: ${error.message}</p>
+                <button onclick="window.location.reload()" class="btn btn-outline-light btn-sm">Try Again</button>
+            </div>
+        `;
+    }
+}
+
+// Progress tracking with IntersectionObserver
+const observerOptions = {
+    root: null,
+    rootMargin: '0px',
+    threshold: 0.5
+};
+
+const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting) {
+            const pageMatch = entry.target.alt.match(/Page (\d+)/);
+            if (pageMatch) {
+                const pageNum = parseInt(pageMatch[1]);
+                updateProgress(pageNum);
+            }
+        }
+    });
+}, observerOptions);
+
+let lastSavedPage = {{ progress.current_page if progress else 1 }};
+let totalPages = 0;
+
+async function updateProgress(page) {
+    if (page === lastSavedPage) return;
+    lastSavedPage = page;
+    
+    {% if current_user.is_authenticated %}
+    try {
+        await fetch('/api/reading_progress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                comic_id: {{ comic.id }},
+                current_page: page,
+                total_pages: totalPages
+            })
+        });
+    } catch (e) {
+        console.warn('Failed to save progress', e);
+    }
+    {% endif %}
+}
+
+document.addEventListener('DOMContentLoaded', loadReader);
+</script>
+{% endblock %}

@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block title %}{{ category.name }} - ComicVault{% endblock %}
+
+{% block extra_css %}
+<style>
+    .category-header {
+        background: linear-gradient(135deg, var(--primary-color) 0%, #8b5cf6 100%);
+        color: white;
+        padding: 3rem 0;
+        margin-bottom: 2rem;
+    }
+    
+    .category-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+    }
+    
+    .category-header h1 {
+        font-weight: 800;
+        margin-bottom: 0.5rem;
+    }
+    
+    .category-header p {
+        opacity: 0.9;
+    }
+    
+    .comic-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 1.5rem;
+    }
+    
+    .comic-card {
+        background: var(--card-bg);
+        border-radius: 12px;
+        overflow: hidden;
+        transition: all 0.3s ease;
+        text-decoration: none;
+        color: inherit;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .comic-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    }
+    
+    .comic-card-cover {
+        position: relative;
+        aspect-ratio: 2/3;
+        background: var(--darker-bg);
+        overflow: hidden;
+    }
+    
+    .comic-card-cover img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    .comic-card-cover .placeholder-cover {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-muted);
+        font-size: 3rem;
+    }
+    
+    .comic-card-rating {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(0,0,0,0.7);
+        color: #fbbf24;
+        padding: 4px 8px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    
+    .comic-card-body {
+        padding: 1rem;
+    }
+    
+    .comic-card-title {
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 0.25rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    
+    .comic-card-author {
+        color: var(--text-muted);
+        font-size: 0.8rem;
+    }
+    
+    .comic-card-chapters {
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        margin-top: 0.25rem;
+    }
+    
+    .pagination {
+        justify-content: center;
+        margin-top: 2rem;
+    }
+    
+    .page-link {
+        background: var(--card-bg);
+        border-color: var(--border-color);
+        color: var(--text-primary);
+    }
+    
+    .page-link:hover {
+        background: var(--primary-color);
+        border-color: var(--primary-color);
+        color: white;
+    }
+    
+    .page-item.active .page-link {
+        background: var(--primary-color);
+        border-color: var(--primary-color);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Category Header -->
+<div class="category-header">
+    <div class="container">
+        <div class="text-center">
+            <i class="{{ category.icon or 'fas fa-book' }} category-icon"></i>
+            <h1>{{ category.name }}</h1>
+            <p>{{ comics.total if comics.total else 0 }} comics in this category</p>
+        </div>
+    </div>
+</div>
+
+<!-- Comics Grid -->
+<div class="container">
+    {% if comics.items %}
+    <div class="comic-grid">
+        {% for comic in comics.items %}
+        <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}" class="comic-card">
+            <div class="comic-card-cover">
+                {% if comic.cover_url %}
+                    <img class="lazy-image" data-src="{{ comic.cover_url }}" alt="{{ comic.title }}" loading="lazy">
+                {% else %}
+                    <div class="placeholder-cover">
+                        <i class="fas fa-image"></i>
+                    </div>
+                {% endif %}
+                <span class="comic-card-rating">
+                    <i class="fas fa-star"></i> {{ "%.1f"|format(comic.average_rating or 0) }}
+                </span>
+            </div>
+            <div class="comic-card-body">
+                <h4 class="comic-card-title">{{ comic.title }}</h4>
+                <p class="comic-card-author">{{ comic.author or 'Unknown' }}</p>
+                <p class="comic-card-chapters">
+                    <i class="fas fa-list me-1"></i> {{ comic.chapters.count() if comic.chapters else 0 }} chapters
+                </p>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    
+    <!-- Pagination -->
+    {% if comics.pages > 1 %}
+    <nav class="pagination">
+        <ul class="pagination">
+            {% if comics.has_prev %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.category_view', slug=category.slug, page=comics.prev_num) }}">
+                    <i class="fas fa-chevron-left"></i> Previous
+                </a>
+            </li>
+            {% endif %}
+            
+            {% for p in comics.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                {% if p %}
+                    <li class="page-item {{ 'active' if p == page else '' }}">
+                        <a class="page-link" href="{{ url_for('main.category_view', slug=category.slug, page=p) }}">{{ p }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if comics.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.category_view', slug=category.slug, page=comics.next_num) }}">
+                    Next <i class="fas fa-chevron-right"></i>
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+    
+    {% else %}
+    <div class="text-center py-5">
+        <i class="fas fa-folder-open fa-4x text-muted mb-3"></i>
+        <h3>No comics in this category yet</h3>
+        <p class="text-muted">Check back later or explore other categories.</p>
+        <a href="{{ url_for('main.home') }}" class="btn btn-primary mt-3">
+            <i class="fas fa-home me-2"></i>Back to Home
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

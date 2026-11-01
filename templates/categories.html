@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+
+{% block title %}Categories - {{ config.APP_NAME }}{% endblock %}
+
+{% block content %}
+<section class="categories-section py-5 position-relative overflow-hidden">
+    <!-- Decorative Background Elements -->
+    <div class="blob-bg blob-1"></div>
+    <div class="blob-bg blob-2"></div>
+
+    <div class="container position-relative z-index-1">
+        <div class="section-header text-center mb-5 mt-4">
+            <h1 class="display-4 fw-bold mb-3 bg-clip-text text-transparent bg-gradient-primary-to-secondary">
+                Explore Universes
+            </h1>
+            <p class="lead text-muted mx-auto" style="max-width: 600px;">
+                Dive into thousands of comics categorized by your favorite genres. What world will you explore today?
+            </p>
+            
+            <!-- Search Bar -->
+            <div class="search-container mx-auto mt-4" style="max-width: 500px;">
+                <div class="input-group input-group-lg shadow-sm rounded-pill overflow-hidden border">
+                    <span class="input-group-text bg-white border-0 ps-4 text-muted">
+                        <i class="fas fa-search"></i>
+                    </span>
+                    <input type="text" id="categorySearch" class="form-control border-0 px-3 shadow-none" placeholder="Search categories..." onkeyup="filterCategories()">
+                </div>
+            </div>
+        </div>
+        
+        {% if categories %}
+        <div class="row g-4" id="categoriesGrid">
+            {% for category in categories %}
+            <div class="col-6 col-md-4 col-lg-3 category-item" data-name="{{ category.name|lower }}">
+                <a href="{{ url_for('main.category_view', slug=category.slug) }}" class="text-decoration-none">
+                    <!-- Dynamic class for gradient based on name length/hash to ensure variety -->
+                    <div class="category-card card h-100 border-0 shadow-sm glass-card gradient-{{ (loop.index % 6) + 1 }}">
+                        <div class="card-body d-flex flex-column align-items-center justify-content-center p-4">
+                            <div class="category-icon-wrapper mb-3">
+                                {% if 'fa-' in category.icon %}
+                                    <i class="{{ category.icon }} category-icon display-4 text-white"></i>
+                                {% else %}
+                                    <span class="category-icon display-4">{{ category.icon }}</span>
+                                {% endif %}
+                            </div>
+                            <h5 class="card-title fw-bold text-white mb-2 text-shadow">{{ category.name }}</h5>
+                            <span class="badge bg-white text-dark rounded-pill px-3 py-2 shadow-sm font-monospace">
+                                {{ category.count }} comic{% if category.count != 1 %}s{% endif %}
+                            </span>
+                        </div>
+                        <div class="card-hover-overlay">
+                            <span class="btn btn-light rounded-pill px-4 fw-bold shadow">Explore</span>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <!-- No Results State -->
+        <div id="noResults" class="text-center py-5 d-none">
+            <div class="empty-state py-5">
+                <i class="fas fa-search display-1 text-muted opacity-50 mb-4"></i>
+                <h3 class="fw-bold">No categories found</h3>
+                <p class="text-muted">Try adjusting your search term</p>
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+            <div class="empty-state py-5">
+                <div class="display-1 mb-4 position-relative d-inline-block">
+                    📚
+                    <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 0.3em;">
+                        0
+                    </span>
+                </div>
+                <h3 class="fw-bold mt-2">No Categories Yet</h3>
+                <p class="text-muted lead">The multiverse is currently empty. Categories will appear once comics are added.</p>
+                <a href="{{ url_for('main.user_upload') }}" class="btn btn-primary btn-lg rounded-pill px-4 mt-3 shadow">
+                    <i class="fas fa-cloud-upload-alt me-2"></i>Upload First Comic
+                </a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</section>
+
+<style>
+/* Background and Blobs */
+.categories-section {
+    min-height: calc(100vh - 100px);
+    background-color: #f8f9fa;
+}
+
+[data-bs-theme="dark"] .categories-section {
+    background-color: #121212;
+}
+
+.blob-bg {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    z-index: 0;
+    opacity: 0.4;
+    animation: float 10s infinite ease-in-out alternate;
+}
+
+.blob-1 {
+    top: -100px;
+    left: -100px;
+    width: 400px;
+    height: 400px;
+    background: #4e73df;
+}
+
+.blob-2 {
+    bottom: -100px;
+    right: -100px;
+    width: 500px;
+    height: 500px;
+    background: #1cc88a;
+    animation-delay: -5s;
+}
+
+@keyframes float {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(30px, 50px) scale(1.1); }
+}
+
+.bg-clip-text {
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+.bg-gradient-primary-to-secondary {
+    background-image: linear-gradient(135deg, #4e73df 0%, #1cc88a 100%);
+}
+
+.text-transparent {
+    color: transparent !important;
+}
+
+.text-shadow {
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+/* Category Cards */
+.category-card {
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border-radius: 20px;
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+}
+
+/* Glassmorphism */
+.glass-card {
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* Gradients */
+.gradient-1 { background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%); }
+.gradient-2 { background: linear-gradient(120deg, #a1c4fd 0%, #c2e9fb 100%); }
+.gradient-3 { background: linear-gradient(120deg, #d4fc79 0%, #96e6a1 100%); }
+.gradient-4 { background: linear-gradient(120deg, #84fab0 0%, #8fd3f4 100%); }
+.gradient-5 { background: linear-gradient(120deg, #fccb90 0%, #d57eeb 100%); }
+.gradient-6 { background: linear-gradient(120deg, #e0c3fc 0%, #8ec5fc 100%); }
+
+[data-bs-theme="dark"] .gradient-1 { background: linear-gradient(135deg, #7c3a3c 0%, #594050 100%); }
+[data-bs-theme="dark"] .gradient-2 { background: linear-gradient(120deg, #2a4365 0%, #2c5282 100%); }
+[data-bs-theme="dark"] .gradient-3 { background: linear-gradient(120deg, #385e0d 0%, #276749 100%); }
+[data-bs-theme="dark"] .gradient-4 { background: linear-gradient(120deg, #234e52 0%, #2c5282 100%); }
+[data-bs-theme="dark"] .gradient-5 { background: linear-gradient(120deg, #744210 0%, #553c9a 100%); }
+[data-bs-theme="dark"] .gradient-6 { background: linear-gradient(120deg, #44337a 0%, #2a4365 100%); }
+
+.category-card:hover {
+    transform: translateY(-10px) scale(1.03);
+    box-shadow: 0 20px 30px rgba(0,0,0,0.15) !important;
+}
+
+.category-icon-wrapper {
+    transition: transform 0.4s ease;
+}
+
+.category-card:hover .category-icon-wrapper {
+    transform: scale(1.2) rotate(5deg);
+}
+
+.category-icon {
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2));
+}
+
+/* Overlay on Hover */
+.card-hover-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.category-card:hover .card-hover-overlay {
+    opacity: 1;
+}
+
+/* Animations */
+.category-item {
+    animation: fadeInUp 0.6s ease backwards;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Search Bar Focus */
+#categorySearch:focus {
+    outline: none;
+    box-shadow: none;
+}
+.search-container .input-group {
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.search-container .input-group:focus-within {
+    border-color: var(--bs-primary) !important;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25) !important;
+}
+</style>
+
+<script>
+function filterCategories() {
+    const searchInput = document.getElementById('categorySearch').value.toLowerCase();
+    const categoryItems = document.querySelectorAll('.category-item');
+    let visibleCount = 0;
+
+    categoryItems.forEach(item => {
+        const name = item.getAttribute('data-name');
+        if (name.includes(searchInput)) {
+            item.style.display = '';
+            visibleCount++;
+        } else {
+            item.style.display = 'none';
+        }
+    });
+
+    const noResults = document.getElementById('noResults');
+    const categoriesGrid = document.getElementById('categoriesGrid');
+    
+    if (visibleCount === 0 && searchInput.length > 0) {
+        noResults.classList.remove('d-none');
+        if(categoriesGrid) categoriesGrid.classList.add('d-none');
+    } else {
+        noResults.classList.add('d-none');
+        if(categoriesGrid) categoriesGrid.classList.remove('d-none');
+    }
+}
+
+// Add staggered animation delay to items
+document.addEventListener('DOMContentLoaded', () => {
+    const items = document.querySelectorAll('.category-item');
+    items.forEach((item, index) => {
+        item.style.animationDelay = `${index * 0.05}s`;
+    });
+});
+</script>
+{% endblock %}

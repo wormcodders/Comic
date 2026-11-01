@@ -1,0 +1,116 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Manage Chapters - Admin - ComicVault{% endblock %}
+
+{% block admin_content %}
+<div class="admin-header">
+    <div class="d-flex justify-content-between align-items-center">
+        <h1><i class="fas fa-book-open me-2"></i>Manage Chapters</h1>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="admin-table mb-4">
+    <div class="p-3">
+        <form method="GET" class="row g-3">
+            <div class="col-md-4">
+                <select class="form-select" name="comic_id">
+                    <option value="">All Comics</option>
+                    {% for comic in comics %}
+                    <option value="{{ comic.id }}" {% if selected_comic == comic.id %}selected{% endif %}>
+                        {{ comic.title }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-secondary w-100">Filter</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Chapters Table -->
+<div class="admin-table">
+    <div class="admin-table-header">
+        <h3 class="admin-table-title">All Chapters ({{ chapters.total }})</h3>
+    </div>
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Comic</th>
+                    <th>Chapter</th>
+                    <th>Title</th>
+                    <th>Pages</th>
+                    <th>Views</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for chapter in chapters.items %}
+                <tr>
+                    <td>{{ chapter.comic.title if chapter.comic else 'N/A' }}</td>
+                    <td>#{{ chapter.chapter_number }}</td>
+                    <td>{{ chapter.title or 'Untitled' }}</td>
+                    <td>{{ chapter.page_count or 0 }}</td>
+                    <td>{{ chapter.views or 0 }}</td>
+                    <td>{{ chapter.created_at.strftime('%b %d, %Y') }}</td>
+                    <td>
+                        <div class="table-actions">
+                            <a href="{{ url_for('main.read_comic', comic_id=chapter.comic_id, chapter=chapter.chapter_number) }}" 
+                               class="btn btn-sm btn-outline-primary" target="_blank" title="View">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center py-4">
+                        <i class="fas fa-book-open text-muted fa-2x mb-2"></i>
+                        <p class="text-muted mb-0">No chapters found.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Pagination -->
+    {% if chapters.pages > 1 %}
+    <div class="admin-table-footer">
+        <nav>
+            <ul class="pagination mb-0">
+                {% if chapters.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('main.admin_chapters', page=chapters.prev_num, comic_id=selected_comic) }}">
+                        <i class="fas fa-chevron-left"></i>
+                    </a>
+                </li>
+                {% endif %}
+                
+                {% for p in chapters.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if p %}
+                        <li class="page-item {{ 'active' if p == chapters.page else '' }}">
+                            <a class="page-link" href="{{ url_for('main.admin_chapters', page=p, comic_id=selected_comic) }}">{{ p }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if chapters.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('main.admin_chapters', page=chapters.next_num, comic_id=selected_comic) }}">
+                        <i class="fas fa-chevron-right"></i>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

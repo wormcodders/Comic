@@ -1,0 +1,572 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Bulk Upload Comics - Admin - ComicVault{% endblock %}
+
+{% block extra_css %}
+{{ super() }}
+<style>
+    .bulk-dropzone {
+        border: 2px dashed var(--border-color);
+        background: var(--dark-bg);
+        border-radius: 12px;
+        padding: 3rem 2rem;
+        text-align: center;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        margin-bottom: 2rem;
+    }
+    .bulk-dropzone:hover, .bulk-dropzone.dragover {
+        border-color: var(--primary-color);
+        background: rgba(139, 92, 246, 0.05);
+    }
+    .file-queue-item {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        transition: all 0.2s ease;
+    }
+    .file-queue-item.status-uploading {
+        border-color: #3b82f6;
+        background: rgba(59, 130, 246, 0.02);
+    }
+    .file-queue-item.status-processing {
+        border-color: #f59e0b;
+        background: rgba(245, 158, 11, 0.02);
+    }
+    .file-queue-item.status-success {
+        border-color: #10b981;
+        background: rgba(16, 185, 129, 0.02);
+    }
+    .file-queue-item.status-error {
+        border-color: #ef4444;
+        background: rgba(239, 68, 68, 0.02);
+    }
+    .progress-bar-container {
+        height: 6px;
+        width: 100%;
+        background: rgba(0, 0, 0, 0.1);
+        border-radius: 3px;
+        overflow: hidden;
+        margin-top: 0.5rem;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        background: var(--primary-color);
+        width: 0%;
+        transition: width 0.3s ease;
+    }
+    .file-details {
+        flex-grow: 1;
+    }
+    .file-name {
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+        word-break: break-all;
+    }
+    .file-meta {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        display: flex;
+        gap: 1rem;
+    }
+    .file-status-badge {
+        font-size: 0.8rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 6px;
+        font-weight: 500;
+    }
+    .file-status-badge.pending { background: #6b7280; color: white; }
+    .file-status-badge.uploading { background: #3b82f6; color: white; }
+    .file-status-badge.processing { background: #f59e0b; color: white; }
+    .file-status-badge.success { background: #10b981; color: white; }
+    .file-status-badge.error { background: #ef4444; color: white; }
+    
+    .summary-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+</style>
+{% endblock %}
+
+{% block admin_content %}
+<div class="admin-header">
+    <div>
+        <h1><i class="fas fa-layer-group me-2 text-primary"></i>Bulk Upload Comics</h1>
+        <p class="text-muted mb-0">Upload up to 30 PDF comics. They will be analyzed by Vision AI and saved directly as drafts.</p>
+    </div>
+    <a href="{{ url_for('main.admin_comics') }}" class="btn btn-outline-secondary">
+        <i class="fas fa-arrow-left me-2"></i>Back to Comics
+    </a>
+</div>
+
+<!-- Upload Summary (Hidden initially) -->
+<div class="summary-card" id="uploadSummary" style="display: none;">
+    <div class="row text-center">
+        <div class="col-md-3 border-end">
+            <div class="fs-4 fw-bold" id="totalCount">0</div>
+            <div class="text-muted small">Total Files</div>
+        </div>
+        <div class="col-md-3 border-end">
+            <div class="fs-4 fw-bold text-primary" id="processingCount">0</div>
+            <div class="text-muted small">Processing</div>
+        </div>
+        <div class="col-md-3 border-end">
+            <div class="fs-4 fw-bold text-success" id="successCount">0</div>
+            <div class="text-muted small">Successful Drafts</div>
+        </div>
+        <div class="col-md-3">
+            <div class="fs-4 fw-bold text-danger" id="failedCount">0</div>
+            <div class="text-muted small">Failed</div>
+        </div>
+    </div>
+    <div class="progress mt-3" style="height: 10px;">
+        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" id="overallProgress" style="width: 0%;"></div>
+    </div>
+</div>
+
+<!-- Upload Container -->
+<div class="row">
+    <div class="col-lg-8">
+        <!-- Dropzone -->
+        <div class="bulk-dropzone" id="bulkDropzone">
+            <i class="fas fa-file-pdf fa-4x text-muted mb-3"></i>
+            <h3>Drag & Drop up to 30 PDFs here</h3>
+            <p class="text-muted">or click to browse from your device</p>
+            <span class="badge bg-secondary">Max size: 50MB per file</span>
+            <input type="file" id="bulkFileInput" accept=".pdf" multiple style="display: none;">
+        </div>
+
+        <!-- File Queue Section -->
+        <div id="fileQueueContainer" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="mb-0">Upload Queue</h4>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-danger" id="clearQueueBtn">
+                        <i class="fas fa-trash-alt me-1"></i>Clear Queue
+                    </button>
+                </div>
+            </div>
+            <div id="fileQueueList"></div>
+            
+            <div class="d-grid mt-4">
+                <button class="btn btn-primary btn-lg" id="startUploadBtn">
+                    <i class="fas fa-magic me-2"></i>Process Bulk Uploads with AI
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sidebar / Explainer -->
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="fas fa-robot me-2"></i>AI Automation Details</h5>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">Each uploaded PDF file automatically executes the following workflow pipeline:</p>
+                <ul class="small text-muted ps-3 mb-0">
+                    <li class="mb-2"><strong>Local Storage:</strong> Saves the PDF securely in the repository uploads.</li>
+                    <li class="mb-2"><strong>Cover Extraction:</strong> Extracts the first page as a high-quality preview cover image.</li>
+                    <li class="mb-2"><strong>Vision AI Analysis:</strong> Scans the first 3 pages of the comic to automatically identify:
+                        <ul class="mt-1">
+                            <li>Comic Title</li>
+                            <li>Author & Artist name</li>
+                            <li>Primary Category/Genre</li>
+                            <li>Comics Language</li>
+                            <li>Keywords & Tags</li>
+                            <li>80-100 word SEO description</li>
+                        </ul>
+                    </li>
+                    <li class="mb-2"><strong>Page Rendering:</strong> Renders all internal pages immediately to enable reading right after publishing.</li>
+                    <li class="mb-2"><strong>Draft Save:</strong> Saves the record in draft status. The admin can verify and publish with a single click.</li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- Successful Uploads List -->
+        <div class="card" id="processedListCard" style="display: none;">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fas fa-check-double me-2"></i>Processed Drafts</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush" id="processedList"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const bulkDropzone = document.getElementById('bulkDropzone');
+    const bulkFileInput = document.getElementById('bulkFileInput');
+    const fileQueueContainer = document.getElementById('fileQueueContainer');
+    const fileQueueList = document.getElementById('fileQueueList');
+    const clearQueueBtn = document.getElementById('clearQueueBtn');
+    const startUploadBtn = document.getElementById('startUploadBtn');
+    const uploadSummary = document.getElementById('uploadSummary');
+    
+    // Stats elements
+    const totalCountEl = document.getElementById('totalCount');
+    const processingCountEl = document.getElementById('processingCount');
+    const successCountEl = document.getElementById('successCount');
+    const failedCountEl = document.getElementById('failedCount');
+    const overallProgress = document.getElementById('overallProgress');
+    
+    // Processed drafts elements
+    const processedListCard = document.getElementById('processedListCard');
+    const processedList = document.getElementById('processedList');
+
+    let queue = [];
+    let isUploading = false;
+
+    // Trigger file chooser
+    bulkDropzone.addEventListener('click', () => {
+        if (!isUploading) bulkFileInput.click();
+    });
+
+    // File selection
+    bulkFileInput.addEventListener('change', (e) => {
+        handleFilesSelected(e.target.files);
+    });
+
+    // Drag and drop events
+    bulkDropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (!isUploading) bulkDropzone.classList.add('dragover');
+    });
+
+    bulkDropzone.addEventListener('dragleave', () => {
+        bulkDropzone.classList.remove('dragover');
+    });
+
+    bulkDropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        bulkDropzone.classList.remove('dragover');
+        if (!isUploading) {
+            handleFilesSelected(e.dataTransfer.files);
+        }
+    });
+
+    function handleFilesSelected(filesList) {
+        const remainingSpots = 30 - queue.length;
+        if (remainingSpots <= 0) {
+            showNotification('Queue limit reached (max 30 files).', 'error');
+            return;
+        }
+
+        const filesToProcess = Array.from(filesList).slice(0, remainingSpots);
+        
+        filesToProcess.forEach(file => {
+            if (file.type !== 'application/pdf') {
+                showNotification(`Skipped "${file.name}" because it is not a PDF.`, 'warning');
+                return;
+            }
+            if (file.size > 50 * 1024 * 1024) {
+                showNotification(`Skipped "${file.name}" because it exceeds 50MB.`, 'warning');
+                return;
+            }
+            
+            // Add to queue array
+            const queueItem = {
+                id: generateId(),
+                file: file,
+                status: 'pending', // pending, uploading, processing, success, error
+                progress: 0,
+                errorMessage: '',
+                comicId: null
+            };
+            
+            queue.push(queueItem);
+            renderQueueItem(queueItem);
+        });
+
+        if (queue.length > 0) {
+            fileQueueContainer.style.display = 'block';
+        }
+    }
+
+    function generateId() {
+        return Math.random().toString(36).substring(2, 9);
+    }
+
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function renderQueueItem(item) {
+        const itemHtml = `
+            <div class="file-queue-item" id="queue-item-${item.id}">
+                <i class="fas fa-file-pdf fa-2x text-danger"></i>
+                <div class="file-details">
+                    <div class="file-name">${escapeHtml(item.file.name)}</div>
+                    <div class="file-meta">
+                        <span>Size: ${formatBytes(item.file.size)}</span>
+                        <span id="progress-percent-${item.id}">Ready</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" id="progress-bar-${item.id}"></div>
+                    </div>
+                </div>
+                <div>
+                    <span class="file-status-badge pending" id="status-badge-${item.id}">Pending</span>
+                </div>
+                <div>
+                    <button class="btn btn-sm text-danger" onclick="removeFromQueue('${item.id}')" id="remove-btn-${item.id}">
+                        <i class="fas fa-times-circle"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        fileQueueList.insertAdjacentHTML('beforeend', itemHtml);
+    }
+
+    window.removeFromQueue = function(id) {
+        if (isUploading) return;
+        queue = queue.filter(item => item.id !== id);
+        const element = document.getElementById(`queue-item-${id}`);
+        if (element) element.remove();
+        
+        if (queue.length === 0) {
+            fileQueueContainer.style.display = 'none';
+        }
+    };
+
+    clearQueueBtn.addEventListener('click', () => {
+        if (isUploading) return;
+        queue = [];
+        fileQueueList.innerHTML = '';
+        fileQueueContainer.style.display = 'none';
+    });
+
+    // Start bulk upload process
+    startUploadBtn.addEventListener('click', async () => {
+        if (queue.length === 0 || isUploading) return;
+        
+        isUploading = true;
+        startUploadBtn.disabled = true;
+        clearQueueBtn.disabled = true;
+        document.querySelectorAll('[id^="remove-btn-"]').forEach(btn => btn.disabled = true);
+        
+        // Setup summary
+        uploadSummary.style.display = 'block';
+        updateSummaryStats();
+        
+        // Process sequentially
+        for (let i = 0; i < queue.length; i++) {
+            const item = queue[i];
+            if (item.status === 'success') continue;
+            
+            await processQueueFile(item);
+            updateSummaryStats();
+        }
+        
+        isUploading = false;
+        startUploadBtn.innerHTML = '<i class="fas fa-check-circle me-2"></i>Processing Complete';
+        showNotification('Bulk upload processing complete!', 'success');
+    });
+
+    async function processQueueFile(item) {
+        item.status = 'uploading';
+        updateQueueItemUI(item);
+        
+        const formData = new FormData();
+        formData.append('file', item.file);
+        
+        return new Promise((resolve) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/admin/bulk_upload_file', true);
+            
+            // Set CSRF token header
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            if (csrfToken) {
+                xhr.setRequestHeader('X-CSRFToken', csrfToken);
+            }
+            
+            // XHR Upload Progress (represents file sent to server)
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 80); // Max 80% until server processing
+                    item.progress = percent;
+                    updateQueueItemProgress(item, `${percent}% Uploaded`);
+                }
+            };
+            
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            item.status = 'success';
+                            item.progress = 100;
+                            item.comicId = response.comic_id;
+                            updateQueueItemUI(item);
+                            addProcessedDraft(response);
+                        } else {
+                            item.status = 'error';
+                            item.errorMessage = response.message || 'Upload failed';
+                            updateQueueItemUI(item);
+                        }
+                    } catch (e) {
+                        item.status = 'error';
+                        item.errorMessage = 'Invalid JSON response';
+                        updateQueueItemUI(item);
+                    }
+                } else {
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        item.errorMessage = response.message || `HTTP ${xhr.status} Error`;
+                    } catch (e) {
+                        item.errorMessage = `HTTP ${xhr.status} Error`;
+                    }
+                    item.status = 'error';
+                    updateQueueItemUI(item);
+                }
+                resolve();
+            };
+            
+            xhr.onerror = () => {
+                item.status = 'error';
+                item.errorMessage = 'Network connection failed';
+                updateQueueItemUI(item);
+                resolve();
+            };
+            
+            // Shift to processing status once upload finishes but server is working
+            xhr.upload.onload = () => {
+                item.status = 'processing';
+                updateQueueItemUI(item);
+                updateQueueItemProgress(item, 'Running AI analysis...');
+            };
+            
+            xhr.send(formData);
+        });
+    }
+
+    function updateQueueItemUI(item) {
+        const container = document.getElementById(`queue-item-${item.id}`);
+        const badge = document.getElementById(`status-badge-${item.id}`);
+        
+        // Remove old classes
+        container.className = 'file-queue-item';
+        container.classList.add(`status-${item.status}`);
+        
+        badge.className = 'file-status-badge';
+        
+        switch (item.status) {
+            case 'pending':
+                badge.classList.add('pending');
+                badge.textContent = 'Pending';
+                break;
+            case 'uploading':
+                badge.classList.add('uploading');
+                badge.textContent = 'Uploading';
+                break;
+            case 'processing':
+                badge.classList.add('processing');
+                badge.textContent = 'Analyzing...';
+                break;
+            case 'success':
+                badge.classList.add('success');
+                badge.textContent = 'Saved Draft';
+                updateQueueItemProgress(item, 'Completed 100%');
+                break;
+            case 'error':
+                badge.classList.add('error');
+                badge.textContent = 'Error';
+                updateQueueItemProgress(item, item.errorMessage || 'Unknown error');
+                break;
+        }
+    }
+
+    function updateQueueItemProgress(item, label) {
+        const fill = document.getElementById(`progress-bar-${item.id}`);
+        const percentText = document.getElementById(`progress-percent-${item.id}`);
+        
+        fill.style.width = `${item.progress}%`;
+        percentText.textContent = label;
+        
+        if (item.status === 'error') {
+            percentText.style.color = '#ef4444';
+        }
+    }
+
+    function updateSummaryStats() {
+        const total = queue.length;
+        const uploading = queue.filter(i => i.status === 'uploading').length;
+        const processing = queue.filter(i => i.status === 'processing').length;
+        const success = queue.filter(i => i.status === 'success').length;
+        const failed = queue.filter(i => i.status === 'error').length;
+        
+        totalCountEl.textContent = total;
+        processingCountEl.textContent = uploading + processing;
+        successCountEl.textContent = success;
+        failedCountEl.textContent = failed;
+        
+        const completed = success + failed;
+        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        overallProgress.style.width = `${pct}%`;
+        overallProgress.textContent = `${pct}%`;
+    }
+
+    function addProcessedDraft(data) {
+        processedListCard.style.display = 'block';
+        
+        const langTag = data.metadata && data.metadata.language ? `<span class="badge bg-info text-dark ms-1">${escapeHtml(data.metadata.language)}</span>` : '';
+        const catTag = data.metadata && data.metadata.category ? `<span class="badge bg-secondary ms-1">${escapeHtml(data.metadata.category)}</span>` : '';
+        
+        const itemHtml = `
+            <div class="list-group-item d-flex align-items-center justify-content-between p-3">
+                <div class="d-flex align-items-center gap-3">
+                    <i class="fas fa-file-pdf text-success"></i>
+                    <div>
+                        <div class="fw-bold text-truncate" style="max-width: 250px;">${escapeHtml(data.title)}</div>
+                        <div class="text-muted small">
+                            by ${escapeHtml(data.metadata?.author || 'Unknown')} 
+                            ${langTag}
+                            ${catTag}
+                        </div>
+                    </div>
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="/admin/comics/${data.comic_id}/edit" target="_blank" class="btn btn-sm btn-outline-primary" title="Review details">
+                        <i class="fas fa-edit"></i> Review
+                    </a>
+                </div>
+            </div>
+        `;
+        processedList.insertAdjacentHTML('afterbegin', itemHtml);
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function showNotification(message, type = 'info') {
+        if (typeof showSuccess === 'function' && type === 'success') {
+            showSuccess(message);
+        } else if (typeof showError === 'function' && type === 'error') {
+            showError(message);
+        } else if (typeof showInfo === 'function') {
+            showInfo(message);
+        } else {
+            alert(message);
+        }
+    }
+</script>
+{% endblock %}

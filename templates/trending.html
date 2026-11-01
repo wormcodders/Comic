@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block title %}Trending Comics - ComicVault{% endblock %}
+
+{% block extra_css %}
+<style>
+    .trending-header {
+        background: linear-gradient(135deg, #7b2cbf 0%, #ff6b35 100%);
+        color: white;
+        padding: 3rem 0;
+        margin-bottom: 2rem;
+    }
+    
+    .trending-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(255,107,53,0)); }
+        50% { transform: scale(1.05); filter: drop-shadow(0 0 15px rgba(255,107,53,0.6)); }
+    }
+    
+    .trending-header h1 {
+        font-weight: 800;
+        margin-bottom: 0.5rem;
+    }
+    
+    .trending-header p {
+        opacity: 0.9;
+    }
+    
+    .comic-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 3rem;
+    }
+    
+    .comic-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 16px;
+        overflow: hidden;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        text-decoration: none;
+        color: inherit;
+        box-shadow: 0 8px 32px rgba(31, 38, 135, 0.2);
+        position: relative;
+    }
+    
+    .comic-card:hover {
+        transform: translateY(-8px) scale(1.02);
+        border-color: rgba(255, 255, 255, 0.25);
+        box-shadow: 
+            0 20px 40px rgba(31, 38, 135, 0.3),
+            0 0 30px rgba(255, 107, 53, 0.2);
+    }
+    
+    .comic-card-cover {
+        position: relative;
+        aspect-ratio: 2/3;
+        background: var(--darker-bg);
+        overflow: hidden;
+    }
+    
+    .comic-card-cover img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.4s ease;
+    }
+    
+    .comic-card:hover .comic-card-cover img {
+        transform: scale(1.05);
+    }
+    
+    .placeholder-cover {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-muted);
+        font-size: 3rem;
+    }
+    
+    .rank-badge {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        background: linear-gradient(135deg, #ff6b35, #ee6c4d);
+        color: white;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 0.9rem;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        z-index: 2;
+    }
+    
+    .rank-badge.rank-1 {
+        background: linear-gradient(135deg, #ffd700, #ffa500);
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
+    }
+    
+    .rank-badge.rank-2 {
+        background: linear-gradient(135deg, #c0c0c0, #808080);
+    }
+    
+    .rank-badge.rank-3 {
+        background: linear-gradient(135deg, #cd7f32, #8b5a2b);
+    }
+    
+    .view-count-badge {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+        color: #e0e0e0;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        z-index: 2;
+    }
+    
+    .comic-card-body {
+        padding: 1rem;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.6) 100%);
+    }
+    
+    .comic-card-title {
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 0.25rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        color: white;
+    }
+    
+    .comic-card-author {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 0.8rem;
+    }
+    
+    .pagination {
+        justify-content: center;
+        margin-top: 2rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Trending Header -->
+<div class="trending-header">
+    <div class="container">
+        <div class="text-center">
+            <i class="fas fa-fire trending-icon"></i>
+            <h1>Trending Comics</h1>
+            <p>The most popular and highly read comics right now</p>
+        </div>
+    </div>
+</div>
+
+<!-- Comics Grid -->
+<div class="container">
+    {% if comics %}
+    <div class="comic-grid">
+        {% for comic in comics %}
+        {% set rank = (pagination.page - 1) * pagination.per_page + loop.index %}
+        <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}" class="comic-card">
+            <div class="comic-card-cover">
+                <span class="rank-badge rank-{{ rank if rank <= 3 else 'other' }}">
+                    {{ rank }}
+                </span>
+                <span class="view-count-badge">
+                    <i class="fas fa-eye me-1"></i> {{ comic.view_count }}
+                </span>
+                {% if comic.cover_url %}
+                    <img class="lazy-image" data-src="{{ comic.cover_url }}" alt="{{ comic.title }}" loading="lazy">
+                {% else %}
+                    <div class="placeholder-cover">
+                        <i class="fas fa-image"></i>
+                    </div>
+                {% endif %}
+            </div>
+            <div class="comic-card-body">
+                <h4 class="comic-card-title">{{ comic.title }}</h4>
+                <p class="comic-card-author">{{ comic.author or 'Unknown' }}</p>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    
+    <!-- Pagination -->
+    {% if pagination.pages > 1 %}
+    <nav class="pagination">
+        <ul class="pagination">
+            {% if pagination.has_prev %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.trending', page=pagination.prev_num) }}">
+                    <i class="fas fa-chevron-left"></i> Previous
+                </a>
+            </li>
+            {% endif %}
+            
+            {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                {% if p %}
+                    <li class="page-item {{ 'active' if p == pagination.page else '' }}">
+                        <a class="page-link" href="{{ url_for('main.trending', page=p) }}">{{ p }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if pagination.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.trending', page=pagination.next_num) }}">
+                    Next <i class="fas fa-chevron-right"></i>
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+    
+    {% else %}
+    <div class="text-center py-5">
+        <i class="fas fa-history fa-4x text-muted mb-3"></i>
+        <h3>No trending data available</h3>
+        <p class="text-muted">Start reading comics to generate trending rankings.</p>
+        <a href="{{ url_for('main.home') }}" class="btn btn-primary mt-3">
+            <i class="fas fa-home me-2"></i>Back to Home
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

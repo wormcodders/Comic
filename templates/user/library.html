@@ -1,0 +1,938 @@
+{% extends "base.html" %}
+
+{% block title %}My Library - ComicVault{% endblock %}
+
+{% block extra_css %}
+<style>
+.library-header {
+    background: linear-gradient(135deg, rgba(255, 107, 53, 0.2) 0%, rgba(123, 44, 191, 0.2) 100%);
+    backdrop-filter: var(--blur-lg);
+    -webkit-backdrop-filter: var(--blur-lg);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 1.5rem;
+    padding: 2.5rem 2rem;
+    color: white;
+    margin-bottom: 2rem;
+    box-shadow: var(--glass-shadow-lg);
+}
+
+.library-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.stat-card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 1.2rem;
+    border-radius: 1rem;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+}
+
+.stat-card .number {
+    font-size: 2rem;
+    font-weight: bold;
+    display: block;
+    color: white;
+}
+
+.stat-card .label {
+    font-size: 0.9rem;
+    opacity: 0.8;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* Tabs Container - Scrollbar Completely Removed */
+.filter-tabs {
+    display: flex;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+
+.filter-tabs::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+
+.filter-tabs::-webkit-scrollbar-track,
+.filter-tabs::-webkit-scrollbar-thumb {
+    display: none !important;
+    background: transparent !important;
+}
+
+.filter-tab {
+    padding: 0.85rem 1.4rem;
+    border: none;
+    background: none;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    white-space: nowrap;
+    position: relative;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+.filter-tab:hover {
+    color: white;
+}
+
+.filter-tab.active {
+    color: var(--primary-color, #ff6b35);
+}
+
+.filter-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--primary-color, #ff6b35);
+}
+
+/* Views & Cards */
+.library-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1.5rem;
+    transition: all 0.3s ease;
+}
+
+.library-item {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+    backdrop-filter: var(--blur-md);
+    -webkit-backdrop-filter: var(--blur-md);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+    color: white;
+}
+
+.library-item:hover {
+    transform: translateY(-6px) scale(1.01);
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: 
+        0 16px 36px rgba(0, 0, 0, 0.3),
+        0 0 25px rgba(255, 107, 53, 0.2);
+}
+
+.library-item .cover {
+    position: relative;
+    padding-bottom: 150%;
+    overflow: hidden;
+    background: var(--darker-bg);
+}
+
+.library-item .cover img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.4s ease;
+}
+
+.library-item:hover .cover img {
+    transform: scale(1.05);
+}
+
+.library-item .cover .reading-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.library-item .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+    box-shadow: 0 0 8px var(--primary-color);
+    transition: width 0.3s ease;
+}
+
+.library-item .cover .status-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 0.25rem 0.75rem;
+    border-radius: 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.status-badge.reading, .status-badge-inline.reading {
+    background: rgba(34, 197, 94, 0.2);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #4ade80;
+}
+
+.status-badge.completed, .status-badge-inline.completed {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    color: #60a5fa;
+}
+
+.status-badge.paused, .status-badge-inline.paused {
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+}
+
+.library-item .info {
+    padding: 1rem;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.25) 0%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+.library-item .title {
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: white;
+}
+
+.library-item .meta {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 0.35rem;
+}
+
+.library-item .progress-text {
+    font-size: 0.8rem;
+    color: var(--primary-color, #ff6b35);
+    font-weight: 500;
+}
+
+/* Visibility Toggles between Grid and List */
+.grid-only {
+    display: block;
+}
+.list-only {
+    display: none !important;
+}
+
+/* List View Full-Width Row Layout */
+.library-grid.list-view {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.library-grid.list-view .grid-only {
+    display: none !important;
+}
+
+.library-grid.list-view .list-only {
+    display: flex !important;
+}
+
+.library-grid.list-view .library-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    width: 100%;
+    border-radius: 14px;
+    gap: 1.5rem;
+}
+
+.library-grid.list-view .library-item:hover {
+    transform: translateX(4px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+}
+
+.library-grid.list-view .library-item .cover {
+    width: 65px;
+    height: 90px;
+    padding-bottom: 0;
+    flex-shrink: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+}
+
+.library-grid.list-view .library-item .cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 8px;
+}
+
+.library-grid.list-view .library-item .cover .status-badge,
+.library-grid.list-view .library-item .cover .reading-progress {
+    display: none !important;
+}
+
+.library-grid.list-view .library-item .info {
+    flex: 1;
+    background: transparent;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.library-grid.list-view .library-item .info .title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 0.1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.library-grid.list-view .library-item .info .meta {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 0.2rem;
+}
+
+.library-grid.list-view .library-item .list-progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    max-width: 320px;
+}
+
+.library-grid.list-view .library-item .list-progress-bar {
+    flex: 1;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.library-grid.list-view .library-item .list-progress-bar .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+    border-radius: 4px;
+}
+
+.library-grid.list-view .library-item .list-action {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.status-badge-inline {
+    padding: 0.35rem 0.85rem;
+    border-radius: 2rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.read-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.7);
+    transition: all 0.25s ease;
+}
+
+.library-item:hover .read-btn {
+    background: var(--primary-color, #ff6b35);
+    color: white;
+    transform: translateX(3px);
+}
+
+/* Controls & Dropdown */
+.view-toggle {
+    display: flex;
+    gap: 0.35rem;
+}
+
+.view-toggle button {
+    padding: 0.5rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.7);
+    border-radius: 0.5rem;
+    transition: all 0.25s ease;
+    cursor: pointer;
+}
+
+.view-toggle button:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
+}
+
+.view-toggle button.active {
+    background: var(--primary-color, #ff6b35);
+    color: white;
+    border-color: var(--primary-color, #ff6b35);
+}
+
+.sort-dropdown .dropdown-toggle {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: white;
+    padding: 0.5rem 1.15rem;
+    border-radius: 0.5rem;
+    transition: all 0.25s ease;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.sort-dropdown .dropdown-toggle:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.sort-dropdown .dropdown-menu {
+    background: rgba(26, 28, 35, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0.75rem;
+    padding: 0.5rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    min-width: 210px;
+}
+
+.sort-dropdown .dropdown-item {
+    color: rgba(255, 255, 255, 0.85);
+    padding: 0.5rem 0.85rem;
+    border-radius: 0.45rem;
+    font-size: 0.88rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.2s ease;
+}
+
+.sort-dropdown .dropdown-item:hover,
+.sort-dropdown .dropdown-item:focus {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+.sort-dropdown .dropdown-item.active {
+    background: var(--primary-color, #ff6b35);
+    color: white;
+    font-weight: 600;
+}
+
+.empty-library {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.empty-library .icon {
+    font-size: 4rem;
+    color: rgba(255, 255, 255, 0.15);
+    margin-bottom: 1rem;
+}
+
+.pagination {
+    justify-content: center;
+    margin-top: 3rem;
+}
+
+.page-link {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: white;
+}
+
+.page-link:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.page-item.active .page-link {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+@media (max-width: 768px) {
+    .library-header {
+        padding: 1.5rem;
+    }
+    
+    .library-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .library-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 1rem;
+    }
+    
+    .filter-tab {
+        padding: 0.75rem 1rem;
+        font-size: 0.88rem;
+    }
+
+    .library-grid.list-view .library-item {
+        padding: 0.85rem 1rem;
+        gap: 1rem;
+    }
+
+    .library-grid.list-view .library-item .cover {
+        width: 55px;
+        height: 75px;
+    }
+
+    .library-grid.list-view .library-item .list-progress-wrap {
+        max-width: 180px;
+    }
+
+    .read-btn {
+        display: none;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+    <!-- Library Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="library-header">
+                <h1 class="display-5 fw-bold mb-3">My Library</h1>
+                <p class="mb-0 opacity-80">Your personal comic collection and reading history</p>
+                
+                <div class="library-stats">
+                    <div class="stat-card">
+                        <span class="number" id="stat-total">{{ stats.total_comics or 0 }}</span>
+                        <span class="label">Total Comics</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="number" id="stat-reading">{{ stats.currently_reading or 0 }}</span>
+                        <span class="label">Currently Reading</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="number" id="stat-completed">{{ stats.completed or 0 }}</span>
+                        <span class="label">Completed</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="number" id="stat-hours">{{ stats.total_hours or 0.0 }}</span>
+                        <span class="label">Hours Read</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters and Controls -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 pb-2 border-bottom border-secondary border-opacity-25">
+                <!-- Filter Tabs -->
+                <div class="filter-tabs">
+                    <button class="filter-tab active" data-filter="all" onclick="filterLibrary('all', this)">
+                        All Comics
+                    </button>
+                    <button class="filter-tab" data-filter="reading" onclick="filterLibrary('reading', this)">
+                        Currently Reading
+                    </button>
+                    <button class="filter-tab" data-filter="completed" onclick="filterLibrary('completed', this)">
+                        Completed
+                    </button>
+                    <button class="filter-tab" data-filter="favorites" onclick="filterLibrary('favorites', this)">
+                        Favorites
+                    </button>
+                </div>
+
+                <!-- Controls -->
+                <div class="d-flex gap-3 align-items-center">
+                    <!-- View Toggle -->
+                    <div class="view-toggle">
+                        <button class="active" data-view="grid" onclick="setView('grid', this)" title="Grid View" aria-label="Grid view">
+                            <i class="fas fa-th"></i>
+                        </button>
+                        <button data-view="list" onclick="setView('list', this)" title="List View" aria-label="List view">
+                            <i class="fas fa-list"></i>
+                        </button>
+                    </div>
+
+                    <!-- Sort Dropdown -->
+                    <div class="sort-dropdown dropdown">
+                        <button class="dropdown-toggle" id="sortDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-sort me-1"></i> Sort: Title (A-Z)
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end glass-dropdown" aria-labelledby="sortDropdownBtn">
+                            <li><a class="dropdown-item glass-dropdown-item active" href="javascript:void(0)" data-sort="title-asc" onclick="sortLibrary('title-asc', event)"><i class="fas fa-sort-alpha-down me-2"></i>Title (A - Z)</a></li>
+                            <li><a class="dropdown-item glass-dropdown-item" href="javascript:void(0)" data-sort="title-desc" onclick="sortLibrary('title-desc', event)"><i class="fas fa-sort-alpha-up me-2"></i>Title (Z - A)</a></li>
+                            <li><hr class="dropdown-divider border-secondary opacity-25"></li>
+                            <li><a class="dropdown-item glass-dropdown-item" href="javascript:void(0)" data-sort="author" onclick="sortLibrary('author', event)"><i class="fas fa-user-edit me-2"></i>Author</a></li>
+                            <li><a class="dropdown-item glass-dropdown-item" href="javascript:void(0)" data-sort="progress-desc" onclick="sortLibrary('progress-desc', event)"><i class="fas fa-tasks me-2"></i>Progress (High to Low)</a></li>
+                            <li><a class="dropdown-item glass-dropdown-item" href="javascript:void(0)" data-sort="progress-asc" onclick="sortLibrary('progress-asc', event)"><i class="fas fa-tasks me-2"></i>Progress (Low to High)</a></li>
+                            <li><hr class="dropdown-divider border-secondary opacity-25"></li>
+                            <li><a class="dropdown-item glass-dropdown-item" href="javascript:void(0)" data-sort="recent" onclick="sortLibrary('recent', event)"><i class="fas fa-history me-2"></i>Recently Read</a></li>
+                            <li><a class="dropdown-item glass-dropdown-item" href="javascript:void(0)" data-sort="added" onclick="sortLibrary('added', event)"><i class="fas fa-calendar-plus me-2"></i>Recently Added</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Library Content -->
+    <div class="row" id="libraryContent">
+        <div class="col-12">
+            <div class="library-grid" id="libraryGrid" style="{% if not comics %}display: none;{% endif %}">
+                {% for comic in comics %}
+                    {% set progress = comic.reading_progress.filter_by(user_id=current_user.id).first() %}
+                    {% if progress %}
+                        {% set percent = (progress.percent_complete or progress.percentage or 0)|int %}
+                        {% if progress.completed or progress.is_completed %}
+                            {% set status = "completed" %}
+                            {% set status_text = "Completed" %}
+                        {% elif percent > 0 %}
+                            {% set status = "reading" %}
+                            {% set status_text = "Reading" %}
+                        {% else %}
+                            {% set status = "reading" %}
+                            {% set status_text = "Not Started" %}
+                        {% endif %}
+                        {% set recent_val = progress.last_read.isoformat() if progress.last_read else (progress.last_read_at.isoformat() if progress.last_read_at else '') %}
+                    {% else %}
+                        {% set percent = 0 %}
+                        {% set status = "reading" %}
+                        {% set status_text = "Not Started" %}
+                        {% set recent_val = '' %}
+                    {% endif %}
+                    
+                    <div class="library-item" 
+                         data-status="{{ status }}"
+                         data-title="{{ comic.title|lower }}"
+                         data-author="{{ (comic.author or 'Unknown')|lower }}"
+                         data-progress="{{ percent }}"
+                         data-recent="{{ recent_val }}"
+                         data-added="{{ comic.created_at.isoformat() if comic.created_at else '' }}"
+                         onclick="window.location.href='{{ url_for('main.comic_detail', comic_id=comic.id) }}'">
+                        
+                        <div class="cover">
+                            {% if comic.cover_url %}
+                                <img class="lazy-image" data-src="{{ comic.cover_url }}" alt="{{ comic.title }}" loading="lazy">
+                            {% else %}
+                                <div class="placeholder-cover">
+                                    <i class="fas fa-image"></i>
+                                </div>
+                            {% endif %}
+                            <div class="reading-progress">
+                                <div class="progress-fill" style="width: {{ percent }}%;"></div>
+                            </div>
+                            <div class="status-badge {{ status }}">{{ status_text }}</div>
+                        </div>
+                        
+                        <div class="info">
+                            <div class="title" title="{{ comic.title }}">{{ comic.title }}</div>
+                            <div class="meta"><i class="fas fa-user-edit me-1 opacity-60"></i>{{ comic.author or 'Unknown' }}</div>
+                            
+                            <!-- Visible in Grid view -->
+                            <div class="progress-text grid-only">
+                                <i class="fas fa-book-reader me-1"></i>{{ percent }}% Complete
+                            </div>
+
+                            <!-- Visible in List view -->
+                            <div class="list-progress-wrap list-only">
+                                <div class="list-progress-bar">
+                                    <div class="progress-fill" style="width: {{ percent }}%;"></div>
+                                </div>
+                                <span class="progress-text">{{ percent }}% Complete</span>
+                            </div>
+                        </div>
+
+                        <!-- Visible in List view (Right action) -->
+                        <div class="list-action list-only">
+                            <span class="status-badge-inline {{ status }}">{{ status_text }}</span>
+                            <span class="read-btn" title="Open Comic"><i class="fas fa-chevron-right"></i></span>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <!-- Empty State -->
+            <div class="empty-library" id="emptyState" style="{% if comics %}display: none;{% else %}display: block;{% endif %}">
+                <div class="icon">
+                    <i class="fas fa-book-open"></i>
+                </div>
+                <h3 style="color: white;">No comics found</h3>
+                <p class="text-muted">Start building your library by exploring our collection or uploading your own comics.</p>
+                <div class="mt-3">
+                    <a href="/" class="glass-btn me-2">
+                        <i class="fas fa-compass"></i> Explore
+                    </a>
+                    {% if current_user.is_admin %}
+                    <a href="{{ url_for('main.admin_comic_create') }}" class="glass-btn glass-btn-secondary">
+                        <i class="fas fa-plus"></i> Upload Comics
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Pagination -->
+            {% if pagination and pagination.pages > 1 %}
+            <nav class="pagination">
+                <ul class="pagination">
+                    {% if pagination.has_prev %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('main.library', page=pagination.prev_num) }}">
+                            <i class="fas fa-chevron-left"></i> Previous
+                        </a>
+                    </li>
+                    {% endif %}
+                    
+                    {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                        {% if p %}
+                            <li class="page-item {{ 'active' if p == pagination.page else '' }}">
+                                <a class="page-link" href="{{ url_for('main.library', page=p) }}">{{ p }}</a>
+                            </li>
+                        {% else %}
+                            <li class="page-item disabled">
+                                <span class="page-link">...</span>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+                    
+                    {% if pagination.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('main.library', page=pagination.next_num) }}">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentFilter = 'all';
+let currentSort = 'title-asc';
+let currentView = 'grid';
+
+function filterLibrary(filter, tabBtn) {
+    currentFilter = filter;
+    
+    // Update active tab button
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    if (tabBtn) {
+        tabBtn.classList.add('active');
+    } else {
+        const btn = document.querySelector(`.filter-tab[data-filter="${filter}"]`);
+        if (btn) btn.classList.add('active');
+    }
+    
+    // Filter items
+    const items = document.querySelectorAll('.library-item');
+    let visibleCount = 0;
+    
+    items.forEach(item => {
+        const status = item.dataset.status;
+        let show = false;
+        
+        if (filter === 'all' || filter === 'favorites') {
+            show = true;
+        } else if (filter === 'reading') {
+            show = (status === 'reading');
+        } else if (filter === 'completed') {
+            show = (status === 'completed');
+        } else if (filter === status) {
+            show = true;
+        }
+        
+        if (show) {
+            item.style.display = '';
+            visibleCount++;
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    // Show/hide empty state
+    const emptyState = document.getElementById('emptyState');
+    const grid = document.getElementById('libraryGrid');
+    
+    if (visibleCount === 0) {
+        if (emptyState) emptyState.style.display = 'block';
+        if (grid) grid.style.display = 'none';
+    } else {
+        if (emptyState) emptyState.style.display = 'none';
+        if (grid) grid.style.display = '';
+    }
+}
+
+function sortLibrary(sortBy, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    currentSort = sortBy;
+    
+    // Update sort button label and active menu item
+    const sortLabels = {
+        'title-asc': 'Title (A-Z)',
+        'title-desc': 'Title (Z-A)',
+        'author': 'Author',
+        'progress-desc': 'Highest Progress',
+        'progress-asc': 'Lowest Progress',
+        'recent': 'Recently Read',
+        'added': 'Date Added'
+    };
+    
+    const sortBtn = document.getElementById('sortDropdownBtn');
+    if (sortBtn && sortLabels[sortBy]) {
+        sortBtn.innerHTML = `<i class="fas fa-sort-amount-down me-1"></i> Sort: ${sortLabels[sortBy]}`;
+    }
+    
+    document.querySelectorAll('.sort-dropdown .dropdown-item').forEach(item => {
+        if (item.dataset.sort === sortBy) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+    
+    const grid = document.getElementById('libraryGrid');
+    if (!grid) return;
+    const items = Array.from(grid.querySelectorAll('.library-item'));
+    
+    items.sort((a, b) => {
+        const titleA = (a.dataset.title || '').trim();
+        const titleB = (b.dataset.title || '').trim();
+        const authorA = (a.dataset.author || '').trim();
+        const authorB = (b.dataset.author || '').trim();
+        const progressA = parseFloat(a.dataset.progress) || 0;
+        const progressB = parseFloat(b.dataset.progress) || 0;
+        const recentA = a.dataset.recent || '';
+        const recentB = b.dataset.recent || '';
+        const addedA = a.dataset.added || '';
+        const addedB = b.dataset.added || '';
+
+        switch(sortBy) {
+            case 'title-asc':
+                return titleA.localeCompare(titleB, undefined, { numeric: true, sensitivity: 'base' });
+            case 'title-desc':
+                return titleB.localeCompare(titleA, undefined, { numeric: true, sensitivity: 'base' });
+            case 'author':
+                return authorA.localeCompare(authorB, undefined, { numeric: true, sensitivity: 'base' });
+            case 'progress-desc':
+                return progressB - progressA;
+            case 'progress-asc':
+                return progressA - progressB;
+            case 'recent':
+                return recentB.localeCompare(recentA);
+            case 'added':
+                return addedB.localeCompare(addedA);
+            default:
+                return 0;
+        }
+    });
+    
+    // Re-append in sorted order
+    items.forEach(item => grid.appendChild(item));
+}
+
+function setView(view, btnElement) {
+    currentView = view;
+    try {
+        localStorage.setItem('comicvault_library_view', view);
+    } catch(e) {}
+    
+    // Update active button
+    document.querySelectorAll('.view-toggle button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    if (btnElement) {
+        btnElement.classList.add('active');
+    } else {
+        const targetBtn = document.querySelector(`.view-toggle button[data-view="${view}"]`);
+        if (targetBtn) targetBtn.classList.add('active');
+    }
+    
+    // Switch view class on container
+    const grid = document.getElementById('libraryGrid');
+    if (grid) {
+        if (view === 'list') {
+            grid.classList.add('list-view');
+        } else {
+            grid.classList.remove('list-view');
+        }
+    }
+}
+
+// Restore saved view and initialize tooltips on load
+document.addEventListener('DOMContentLoaded', function() {
+    try {
+        const savedView = localStorage.getItem('comicvault_library_view');
+        if (savedView && (savedView === 'list' || savedView === 'grid')) {
+            const btn = document.querySelector(`.view-toggle button[data-view="${savedView}"]`);
+            setView(savedView, btn);
+        }
+    } catch(e) {}
+    
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+
+// Keyboard shortcuts for quick tab switching (1-4)
+document.addEventListener('keydown', function(e) {
+    if (['input', 'textarea'].includes((document.activeElement.tagName || '').toLowerCase())) {
+        return;
+    }
+    if (e.key >= '1' && e.key <= '4') {
+        const filterIndex = parseInt(e.key) - 1;
+        const tabs = document.querySelectorAll('.filter-tab');
+        if (tabs[filterIndex]) {
+            tabs[filterIndex].click();
+        }
+    }
+});
+</script>
+{% endblock %}

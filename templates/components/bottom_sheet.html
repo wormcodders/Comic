@@ -1,0 +1,223 @@
+{#
+  ComicVault - Bottom Sheet Navigation Component
+  Phase 2, Week 1 Implementation
+  Usage: {% include 'components/bottom_sheet.html' %}
+#}
+
+<!-- Bottom Sheet Overlay -->
+<div id="bottom-sheet-overlay" class="bottom-sheet-overlay" aria-hidden="true"></div>
+
+<!-- Bottom Sheet Navigation -->
+<nav id="bottom-sheet" class="bottom-sheet" aria-label="Main navigation" aria-hidden="true">
+    <!-- Drag Handle -->
+    <div id="bottom-sheet-handle" class="bottom-sheet-handle" role="button" aria-label="Toggle navigation" tabindex="0">
+        <span class="visually-hidden">Drag to open or close navigation</span>
+    </div>
+
+    <!-- Sheet Content -->
+    <div id="bottom-sheet-content" class="bottom-sheet-content">
+        {% if current_user.is_authenticated %}
+        <!-- User Info Section -->
+        <div class="bottom-sheet-section">
+            <div class="user-info-mini" style="display: flex; align-items: center; gap: 12px; padding: 16px; background: rgba(139, 92, 246, 0.1); border-radius: 12px; margin-bottom: 16px;">
+                <div class="user-avatar" style="width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #ef4444); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 1.25rem; color: white;">
+                    {{ current_user.username[0].upper() if current_user.username else 'U' }}
+                </div>
+                <div class="user-details">
+                    <div class="user-name" style="font-weight: 600; color: #111; font-size: 1rem;">{{ current_user.username }}</div>
+                    <div class="user-role" style="font-size: 0.875rem; color: #555;">{{ 'Admin' if current_user.is_admin else 'Reader' }}</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Quick Actions Grid (2 Rows of Unique Actions) -->
+        <div class="bottom-sheet-section">
+            <h3 class="bottom-sheet-section-title">Quick Actions</h3>
+            <div class="quick-actions-grid">
+                <!-- Action 1: Categories -->
+                <a href="{{ url_for('main.categories') }}" class="quick-action-card">
+                    <div class="quick-action-icon-wrapper categories-icon">
+                        <i class="fas fa-th-large" aria-hidden="true"></i>
+                    </div>
+                    <span class="quick-action-label">Categories</span>
+                </a>
+                
+                <!-- Action 2: Trending -->
+                <a href="{{ url_for('main.trending') }}" class="quick-action-card">
+                    <div class="quick-action-icon-wrapper trending-icon">
+                        <i class="fas fa-fire" aria-hidden="true"></i>
+                    </div>
+                    <span class="quick-action-label">Trending</span>
+                </a>
+                
+                <!-- Action 3: Upload (Admin only) -->
+                {% if current_user.is_authenticated and current_user.is_admin %}
+                <a href="{{ url_for('main.admin_comic_create') }}" class="quick-action-card">
+                    <div class="quick-action-icon-wrapper upload-icon">
+                        <i class="fas fa-cloud-upload-alt" aria-hidden="true"></i>
+                    </div>
+                    <span class="quick-action-label">Upload</span>
+                </a>
+                {% endif %}
+                
+                <!-- Action 4: Random Comic -->
+                <a href="#" class="quick-action-card" onclick="redirectToRandomComic(); return false;">
+                    <div class="quick-action-icon-wrapper random-icon">
+                        <i class="fas fa-random" aria-hidden="true"></i>
+                    </div>
+                    <span class="quick-action-label">Random</span>
+                </a>
+                
+                <!-- Action 5: Admin Panel or Help -->
+                {% if current_user.is_authenticated and current_user.is_admin %}
+                <a href="{{ url_for('main.admin_dashboard') }}" class="quick-action-card">
+                    <div class="quick-action-icon-wrapper admin-icon">
+                        <i class="fas fa-user-shield" aria-hidden="true"></i>
+                    </div>
+                    <span class="quick-action-label">Admin Panel</span>
+                </a>
+                {% else %}
+                <a href="#" class="quick-action-card" onclick="showNotification('Help center coming soon!', 'info'); return false;">
+                    <div class="quick-action-icon-wrapper help-icon">
+                        <i class="fas fa-question-circle" aria-hidden="true"></i>
+                    </div>
+                    <span class="quick-action-label">Help & FAQ</span>
+                </a>
+                {% endif %}
+            </div>
+        </div>
+
+        <script>
+        async function redirectToRandomComic() {
+            try {
+                const response = await fetch('/api/comics/random');
+                const data = await response.json();
+                if (data.success && data.comic && data.comic.url) {
+                    window.location.href = data.comic.url;
+                } else {
+                    showNotification('No comics available to display randomly.', 'warning');
+                }
+            } catch (e) {
+                console.error(e);
+                showNotification('Failed to load a random comic.', 'error');
+            }
+        }
+        </script>
+
+        <!-- Continue Reading Section (if authenticated and has progress) -->
+        {% if current_user.is_authenticated and continue_reading %}
+        <div class="bottom-sheet-section">
+            <h3 class="bottom-sheet-section-title">Continue Reading</h3>
+            <div class="bottom-sheet-recent">
+                {% for item in continue_reading[:5] %}
+                <a href="{{ url_for('main.read_comic', comic_id=item.comic.id) }}" class="bottom-sheet-recent-item">
+                    <img src="{{ item.comic.cover_image or '/static/images/default-cover.jpg' }}" 
+                         alt="{{ item.comic.title }}" 
+                         class="bottom-sheet-recent-cover"
+                         loading="lazy">
+                    <div class="bottom-sheet-recent-title">{{ item.comic.title[:15] }}...</div>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Admin Section (if admin) -->
+        {% if current_user.is_authenticated and current_user.is_admin %}
+        <div class="bottom-sheet-section">
+            <h3 class="bottom-sheet-section-title">Admin</h3>
+            <div class="bottom-sheet-quick-actions">
+                <button class="bottom-sheet-quick-btn" onclick="window.location.href='{{ url_for('main.admin_dashboard') }}'">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="3" y1="9" x2="21" y2="9"/>
+                        <line x1="9" y1="21" x2="9" y2="9"/>
+                    </svg>
+                    Dashboard
+                </button>
+                <button class="bottom-sheet-quick-btn" onclick="window.location.href='{{ url_for('main.admin_comics') }}'">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                        <polyline points="10 9 9 9 8 9"/>
+                    </svg>
+                    Comics
+                </button>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Collapsed State - Always Visible -->
+        <div class="bottom-sheet-collapsed">
+            <a href="{{ url_for('main.home') }}" class="bottom-nav-item {% if request.endpoint == 'main.home' %}active{% endif %}">
+                <span class="bottom-nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                        <polyline points="9 22 9 12 15 12 15 22"/>
+                    </svg>
+                </span>
+                <span class="bottom-nav-label">Home</span>
+            </a>
+            <a href="{{ url_for('main.library') }}" class="bottom-nav-item {% if request.endpoint == 'main.library' %}active{% endif %}">
+                <span class="bottom-nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                    </svg>
+                </span>
+                <span class="bottom-nav-label">Library</span>
+            </a>
+            <a href="{{ url_for('main.search') }}" class="bottom-nav-item {% if request.endpoint == 'main.search' %}active{% endif %}">
+                <span class="bottom-nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/>
+                        <path d="M21 21l-4.35-4.35"/>
+                    </svg>
+                </span>
+                <span class="bottom-nav-label">Search</span>
+            </a>
+            {% if current_user.is_authenticated %}
+            <a href="{{ url_for('main.profile') }}" class="bottom-nav-item {% if request.endpoint == 'main.profile' %}active{% endif %}">
+                <span class="bottom-nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                </span>
+                <span class="bottom-nav-label">Profile</span>
+            </a>
+            {% else %}
+            <a href="{{ url_for('main.login') }}" class="bottom-nav-item">
+                <span class="bottom-nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                        <polyline points="10 17 15 12 10 7"/>
+                        <line x1="15" y1="12" x2="3" y2="12"/>
+                    </svg>
+                </span>
+                <span class="bottom-nav-label">Login</span>
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</nav>
+
+<!-- Include CSS and JS -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bottom_nav.css') }}">
+<script src="{{ url_for('static', filename='js/bottom_nav.js') }}"></script>
+
+<style>
+    /* Hide default navigation when bottom nav is active */
+    @media (max-width: 1024px) {
+        .navbar {
+            display: none !important;
+        }
+        
+        body {
+            padding-bottom: calc(var(--bottom-nav-height) + 20px);
+        }
+    }
+</style>

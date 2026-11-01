@@ -1,0 +1,462 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Settings - Admin - ComicVault{% endblock %}
+
+{% block admin_content %}
+<div class="admin-header">
+    <h1><i class="fas fa-cog me-2"></i>Settings</h1>
+</div>
+
+<!-- Success/Error Messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="mb-4">
+    {% for category, message in messages %}
+    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+<!-- LLM Configuration Section -->
+<div class="admin-table mb-4">
+    <div class="admin-table-header">
+        <h3 class="admin-table-title"><i class="fas fa-brain me-2"></i>LLM Configuration</h3>
+    </div>
+    <div class="p-4">
+        <form method="POST" action="{{ url_for('main.admin_settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <input type="hidden" name="section" value="llm">
+            
+            <div class="row">
+                <div class="col-md-8 mb-3">
+                    <label class="form-label fw-bold">Base URL for LLM API <span class="text-danger">*</span></label>
+                    <input type="url" class="form-control" name="llm_base_url" 
+                           value="{{ settings.llm_base_url }}" 
+                           placeholder="https://api.openai.com/v1" required>
+                    <div class="form-text">OpenAI compatible API endpoint URL</div>
+                </div>
+                <div class="col-md-4 mb-3 d-flex align-items-end">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="llm_use_local" 
+                               name="llm_use_local" value="1" 
+                               {{ 'checked' if settings.llm_use_local == '1' else '' }}>
+                        <label class="form-check-label fw-bold" for="llm_use_local">
+                            Use Local LLM
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">API Key</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" name="llm_api_key" 
+                               value="{{ settings.llm_api_key }}" 
+                               placeholder="sk-..." id="llm_api_key">
+                        <button type="button" class="btn btn-outline-secondary" onclick="togglePassword('llm_api_key')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="form-text">Leave empty if API doesn't require authentication</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Model Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" name="llm_model" 
+                           value="{{ settings.llm_model or 'koboldcpp/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0' }}" 
+                           placeholder="gpt-4-vision-preview" required>
+                    <div class="form-text">Model identifier for vision/completions API</div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Temperature</label>
+                    <div class="input-group">
+                        <input type="number" class="form-control" name="llm_temperature" 
+                               value="{{ settings.llm_temperature or '0.7' }}" 
+                               step="0.1" min="0" max="2" placeholder="0.7">
+                        <span class="input-group-text">0.0 - 2.0</span>
+                    </div>
+                    <div class="form-text">Lower = more focused, Higher = more creative</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Max Tokens</label>
+                    <div class="input-group">
+                        <input type="number" class="form-control" name="llm_max_tokens" 
+                               value="{{ settings.llm_max_tokens or '4096' }}" 
+                               min="100" max="8192" step="100" placeholder="4096">
+                        <span class="input-group-text">tokens</span>
+                    </div>
+                    <div class="form-text">Maximum response length</div>
+                </div>
+            </div>
+            
+            <div class="mt-3 d-flex align-items-center gap-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save me-2"></i>Save LLM Configuration
+                </button>
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="testLLMConnection()">
+                    <i class="fas fa-plug me-2"></i>Test Connection
+                </button>
+                <span id="llm-test-result"></span>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Upload Host Configuration Section -->
+<div class="admin-table mb-4">
+    <div class="admin-table-header">
+        <h3 class="admin-table-title"><i class="fas fa-cloud-upload-alt me-2"></i>Upload Host Configuration (UpFiles)</h3>
+    </div>
+    <div class="p-4">
+        <form method="POST" action="{{ url_for('main.admin_settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <input type="hidden" name="section" value="upfiles">
+            
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i>
+                Configure UpFiles.com API for automatic PDF uploads during comic analysis. 
+                <a href="https://upfiles.com" target="_blank">Get your API token <i class="fas fa-external-link-alt small"></i></a>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-12 mb-3">
+                    <label class="form-label fw-bold">API Endpoint</label>
+                    <input type="url" class="form-control" name="upfiles_endpoint" 
+                           value="{{ settings.upfiles_endpoint or 'https://api.upfiles.com/upload' }}" 
+                           placeholder="https://api.upfiles.com/upload" readonly>
+                    <div class="form-text">UpFiles upload API endpoint (fixed)</div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-12 mb-3">
+                    <label class="form-label fw-bold">API Token <span class="text-danger">*</span></label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" name="upfiles_token" 
+                               value="{{ settings.upfiles_token }}" 
+                               placeholder="Paste Your Token Here" id="upfiles_token">
+                        <button type="button" class="btn btn-outline-secondary" onclick="togglePassword('upfiles_token')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="form-text">Your UpFiles.com authentication token</div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-12 mb-3">
+                    <label class="form-label fw-bold">Folder Alias (Optional)</label>
+                    <input type="text" class="form-control" name="upfiles_folder_alias" 
+                           value="{{ settings.upfiles_folder_alias }}" 
+                           placeholder="comics-uploads">
+                    <div class="form-text">Destination folder for uploaded files on UpFiles</div>
+                </div>
+            </div>
+            
+            <div class="mt-3 d-flex align-items-center gap-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save me-2"></i>Save Upload Configuration
+                </button>
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="testUpfilesConnection()">
+                    <i class="fas fa-plug me-2"></i>Test Connection
+                </button>
+                <span id="upfiles-test-result"></span>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Cloud Storage Configuration (Catbox.moe) Section -->
+<div class="admin-table mb-4">
+    <div class="admin-table-header">
+        <h3 class="admin-table-title"><i class="fas fa-cloud me-2"></i>Cloud Storage Configuration (Catbox.moe)</h3>
+    </div>
+    <div class="p-4">
+        <form method="POST" action="{{ url_for('main.admin_settings') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <input type="hidden" name="section" value="catbox">
+            
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i>
+                When enabled, comic PDFs, cover images, and extracted reading pages stream <strong>directly to Catbox.moe</strong> in-memory. Zero local files are saved to the server disk.
+                External download links (UpFiles) remain independent and unchanged.
+            </div>
+
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="cloud_storage_enabled" 
+                           name="cloud_storage_enabled" value="1" 
+                           {{ 'checked' if settings.cloud_storage_enabled == '1' else '' }}>
+                    <label class="form-check-label fw-bold" for="cloud_storage_enabled">
+                        Enable Catbox.moe Cloud Storage
+                    </label>
+                </div>
+                <div class="form-text">When enabled, all comic assets and extracted reading pages are stored permanently on Catbox.moe.</div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-12 mb-3">
+                    <label class="form-label fw-bold">Catbox User Hash (Optional)</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" name="catbox_userhash" 
+                               value="{{ settings.catbox_userhash or '' }}" 
+                               placeholder="e.g. 9a8b7c6d5e4f3a2b1c0d" id="catbox_userhash">
+                        <button type="button" class="btn btn-outline-secondary" onclick="togglePassword('catbox_userhash')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="form-text">
+                        Your personal Catbox account user hash. If provided, all uploaded files are tied to your Catbox account dashboard where you can manage them. 
+                        <a href="https://catbox.moe/user/manage.php" target="_blank" rel="noopener">Find your userhash on Catbox <i class="fas fa-external-link-alt small"></i></a>.
+                        If left blank, uploads are anonymous.
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-3 d-flex align-items-center gap-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save me-2"></i>Save Cloud Storage Configuration
+                </button>
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="testCatboxConnection()">
+                    <i class="fas fa-plug me-2"></i>Test Catbox Connection
+                </button>
+                <span id="catbox-test-result"></span>
+            </div>
+        </form>
+
+        <hr class="my-4">
+
+        <!-- Migration Tool -->
+        <h5 class="mb-2"><i class="fas fa-dolly-flatbed me-2"></i>Cloud Migration Tool</h5>
+        <p class="text-muted small">
+            Migrate all currently stored local files (covers, PDFs, and extracted pages) to Catbox.moe cloud storage. Local files will be cleaned up to reclaim disk space after successful upload.
+        </p>
+
+        <div class="d-flex align-items-center gap-3">
+            <button type="button" class="btn btn-outline-warning" id="migrateCloudBtn" onclick="migrateToCatbox()">
+                <i class="fas fa-cloud-upload-alt me-2"></i>Migrate Local Library to Catbox
+            </button>
+            <span id="migration-status"></span>
+        </div>
+        <div id="migration-log" class="mt-3" style="display: none;">
+            <div class="alert alert-secondary mb-0 small" id="migration-log-text"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Site Settings Section -->
+<div class="admin-table mb-4">
+    <div class="admin-table-header">
+        <h3 class="admin-table-title"><i class="fas fa-globe me-2"></i>Site Settings</h3>
+    </div>
+    <div class="p-4">
+        <form method="POST" action="{{ url_for('main.admin_settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <input type="hidden" name="section" value="site">
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Site Name</label>
+                    <input type="text" class="form-control" name="site_name" 
+                           value="{{ settings.site_name or 'ComicVault' }}" 
+                           placeholder="ComicVault">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label fw-bold">Items Per Page</label>
+                    <input type="number" class="form-control" name="items_per_page" 
+                           value="{{ settings.items_per_page or '12' }}" min="6" max="48">
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <label class="form-label fw-bold">Site Description</label>
+                <textarea class="form-control" name="site_description" rows="3" 
+                          placeholder="Brief description of your comic site">{{ settings.site_description }}</textarea>
+            </div>
+            
+            <hr class="my-4">
+            
+            <h5 class="mb-3">Maintenance Mode</h5>
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="maintenance_mode" 
+                           name="maintenance_mode" value="1" 
+                           {{ 'checked' if settings.maintenance_mode == '1' else '' }}>
+                    <label class="form-check-label" for="maintenance_mode">
+                        Enable Maintenance Mode
+                    </label>
+                </div>
+                <div class="form-text">When enabled, only admins can access the site</div>
+            </div>
+            
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save me-2"></i>Save Site Settings
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Global Actions -->
+<div class="admin-table mb-4">
+    <div class="admin-table-header">
+        <h3 class="admin-table-title"><i class="fas fa-tools me-2"></i>Global Actions</h3>
+    </div>
+    <div class="p-4">
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-danger" onclick="resetToDefaults()">
+                <i class="fas fa-undo me-2"></i>Reset All Settings to Defaults
+            </button>
+        </div>
+        <div class="form-text mt-2 text-danger">
+            <i class="fas fa-exclamation-triangle me-1"></i>
+            Warning: This will reset ALL settings to their default values. This action cannot be undone.
+        </div>
+    </div>
+</div>
+
+<script>
+function togglePassword(inputId) {
+    const input = document.getElementById(inputId);
+    if (input.type === 'password') {
+        input.type = 'text';
+    } else {
+        input.type = 'password';
+    }
+}
+
+function testLLMConnection() {
+    const resultSpan = document.getElementById('llm-test-result');
+    resultSpan.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+    
+    fetch('/admin/test_llm', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            resultSpan.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Connection successful!</span>';
+        } else {
+            resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' + (data.message || 'Connection failed') + '</span>';
+        }
+    })
+    .catch(error => {
+        resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ' + error.message + '</span>';
+    });
+}
+
+function testUpfilesConnection() {
+    const resultSpan = document.getElementById('upfiles-test-result');
+    resultSpan.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+    
+    fetch('/admin/test_upfiles', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            resultSpan.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> ' + (data.message || 'Connection successful!') + '</span>';
+        } else {
+            resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' + (data.message || 'Connection failed') + '</span>';
+        }
+    })
+    .catch(error => {
+        resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ' + error.message + '</span>';
+    });
+}
+
+function testCatboxConnection() {
+    const resultSpan = document.getElementById('catbox-test-result');
+    const userhash = document.getElementById('catbox_userhash').value;
+    resultSpan.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing Catbox connection...';
+    
+    const csrfToken = document.querySelector('input[name="csrf_token"]') ? document.querySelector('input[name="csrf_token"]').value : '';
+    
+    fetch('/admin/test_catbox', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({ catbox_userhash: userhash })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            resultSpan.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> ' + (data.message || 'Connected successfully!') + '</span>';
+        } else {
+            resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' + (data.message || 'Connection failed') + '</span>';
+        }
+    })
+    .catch(error => {
+        resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ' + error.message + '</span>';
+    });
+}
+
+function migrateToCatbox() {
+    if (!confirm('Start migrating all local files (covers, PDFs, pages) to Catbox.moe?')) {
+        return;
+    }
+    const btn = document.getElementById('migrateCloudBtn');
+    const statusSpan = document.getElementById('migration-status');
+    const logBox = document.getElementById('migration-log');
+    const logText = document.getElementById('migration-log-text');
+    const csrfToken = document.querySelector('input[name="csrf_token"]') ? document.querySelector('input[name="csrf_token"]').value : '';
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Migrating...';
+    statusSpan.innerHTML = '<span class="text-info">Uploading local files to Catbox... This may take a while.</span>';
+    logBox.style.display = 'block';
+    logText.innerText = 'Migration started...';
+    
+    fetch('/admin/migrate_to_cloud', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-cloud-upload-alt me-2"></i>Migrate Local Library to Catbox';
+        if (data.success) {
+            statusSpan.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Done!</span>';
+            logText.innerText = data.message;
+        } else {
+            statusSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Migration failed!</span>';
+            logText.innerText = data.message || 'Unknown error occurred.';
+        }
+    })
+    .catch(error => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-cloud-upload-alt me-2"></i>Migrate Local Library to Catbox';
+        statusSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error!</span>';
+        logText.innerText = error.message;
+    });
+}
+
+function resetToDefaults() {
+    if (confirm('Are you sure you want to reset all settings to defaults? This cannot be undone.')) {
+        fetch('/admin/settings/reset', {
+            method: 'POST'
+        })
+        .then(() => window.location.reload());
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,893 @@
+{% extends "base.html" %}
+
+{% block title %}Discover Comics - ComicVault{% endblock %}
+
+{% block extra_css %}
+<style>
+.discover-container {
+    max-width: 1400px;
+    padding: 0 1rem;
+}
+
+.discover-hero {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(239, 68, 68, 0.1) 100%);
+    border-radius: 1.5rem;
+    padding: 3rem 2rem;
+    margin-bottom: 2rem;
+    text-align: center;
+}
+
+.discover-hero h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #8b5cf6, #ef4444);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.discover-hero p {
+    color: #a0a0a0;
+    font-size: 1.1rem;
+}
+
+/* Search Box */
+.discover-search {
+    max-width: 700px;
+    margin: 2rem auto 0;
+}
+
+.discover-search .search-box {
+    position: relative;
+}
+
+.discover-search .search-box input {
+    width: 100%;
+    padding: 1.25rem 3.5rem 1.25rem 3rem;
+    font-size: 1.1rem;
+    border-radius: 2rem;
+    border: 2px solid rgba(139, 92, 246, 0.3);
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    transition: all 0.3s ease;
+}
+
+.discover-search .search-box input:focus {
+    outline: none;
+    border-color: #8b5cf6;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+}
+
+.discover-search .search-box input::placeholder {
+    color: #6c757d;
+}
+
+.discover-search .search-box .search-icon {
+    position: absolute;
+    left: 1.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #8b5cf6;
+    font-size: 1.2rem;
+}
+
+.discover-search .search-box .search-btn {
+    position: absolute;
+    right: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    border: none;
+    color: #fff;
+    padding: 0.75rem 1.5rem;
+    border-radius: 1.5rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.discover-search .search-box .search-btn:hover {
+    transform: translateY(-50%) scale(1.05);
+    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);
+}
+
+/* Filters Bar */
+.filters-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 1rem;
+    margin-bottom: 2rem;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.filter-group label {
+    color: #a0a0a0;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.filter-select {
+    padding: 0.6rem 2rem 0.6rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23a0a0a0' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: #8b5cf6;
+}
+
+.results-count {
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+/* Comics Grid */
+.comics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+/* Comic Card */
+.comic-card {
+    position: relative;
+    border-radius: 1rem;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.03);
+    transition: all 0.3s ease;
+}
+
+.comic-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.comic-card .cover-wrapper {
+    position: relative;
+    aspect-ratio: 3/4;
+    overflow: hidden;
+}
+
+.comic-card .cover-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.comic-card:hover .cover-image {
+    transform: scale(1.05);
+}
+
+.comic-card .cover-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 50%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.comic-card:hover .cover-overlay {
+    opacity: 1;
+}
+
+.comic-card .card-actions {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    opacity: 0;
+    transform: translateX(10px);
+    transition: all 0.3s ease;
+}
+
+.comic-card:hover .card-actions {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.comic-card .action-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(10px);
+    border: none;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.comic-card .action-btn:hover {
+    background: #8b5cf6;
+    transform: scale(1.1);
+}
+
+.comic-card .card-badges {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.comic-card .badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.comic-card .badge-new {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+}
+
+.comic-card .badge-hot {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.comic-card .badge-trending {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+.comic-card .card-body {
+    padding: 1rem;
+}
+
+.comic-card .card-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.3;
+}
+
+.comic-card .card-title a {
+    color: #fff;
+    text-decoration: none;
+}
+
+.comic-card .card-title a:hover {
+    color: #8b5cf6;
+}
+
+.comic-card .card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: #a0a0a0;
+}
+
+.comic-card .card-rating {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: #f59e0b;
+}
+
+.comic-card .card-author {
+    color: #8b5cf6;
+    font-size: 0.85rem;
+}
+
+/* Pagination */
+.pagination-wrapper {
+    display: flex;
+    justify-content: center;
+    padding: 2rem 0;
+}
+
+.pagination {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.pagination .page-item {
+    list-style: none;
+}
+
+.pagination .page-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+    height: 40px;
+    padding: 0 0.75rem;
+    border-radius: 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    color: #a0a0a0;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pagination .page-link:hover {
+    background: rgba(139, 92, 246, 0.2);
+    color: #8b5cf6;
+    border-color: #8b5cf6;
+}
+
+.pagination .page-item.active .page-link {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: #fff;
+    border-color: transparent;
+}
+
+.pagination .page-item.disabled .page-link {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.empty-state i {
+    font-size: 4rem;
+    color: #6c757d;
+    margin-bottom: 1rem;
+}
+
+.empty-state h3 {
+    color: #a0a0a0;
+    margin-bottom: 0.5rem;
+}
+
+.empty-state p {
+    color: #6c757d;
+}
+
+/* Quick Actions */
+.quick-actions {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 2rem;
+}
+
+.quick-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: 2rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #a0a0a0;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.quick-action-btn:hover {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: #8b5cf6;
+    color: #8b5cf6;
+    transform: translateY(-2px);
+}
+
+.quick-action-btn i {
+    font-size: 1.1rem;
+}
+
+/* Tags Filter */
+.tags-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.tag-chip {
+    padding: 0.4rem 0.9rem;
+    border-radius: 1.5rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #a0a0a0;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tag-chip:hover,
+.tag-chip.active {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: #8b5cf6;
+    color: #8b5cf6;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .discover-hero {
+        padding: 2rem 1rem;
+    }
+    
+    .discover-hero h1 {
+        font-size: 1.75rem;
+    }
+    
+    .filters-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .filter-group {
+        justify-content: space-between;
+    }
+    
+    .comics-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+    }
+    
+    .quick-actions {
+        flex-wrap: wrap;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="discover-container">
+    <!-- Hero Section -->
+    <div class="discover-hero">
+        <h1>Discover Comics</h1>
+        <p>Explore thousands of comics from various genres</p>
+        
+        <div class="discover-search">
+            <form action="{{ url_for('main.discover') }}" method="GET" class="search-box">
+                <i class="fas fa-search search-icon"></i>
+                <input type="text" name="q" placeholder="Search comics, authors, artists..." 
+                       value="{{ query }}" autocomplete="off">
+                <button type="submit" class="search-btn">
+                    <i class="fas fa-search"></i>
+                </button>
+            </form>
+            <button type="button" class="random-btn" onclick="getRandomComic()" title="Surprise me!">
+                <i class="fas fa-dice"></i> Random
+            </button>
+        </div>
+    </div>
+    
+    <!-- Filters Bar -->
+    <form action="{{ url_for('main.discover') }}" method="GET" id="filterForm">
+        {% if query %}
+        <input type="hidden" name="q" value="{{ query }}">
+        {% endif %}
+        
+        <div class="filters-bar">
+            <div class="filter-group">
+                <label>Category:</label>
+                <select name="category" class="filter-select" onchange="document.getElementById('filterForm').submit()">
+                    <option value="">All Categories</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat.name }}" {% if selected_category == cat.name %}selected{% endif %}>
+                        {{ cat.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Sort by:</label>
+                <select name="sort" class="filter-select" onchange="document.getElementById('filterForm').submit()">
+                    <option value="recent" {% if sort == 'recent' %}selected{% endif %}>Newest</option>
+                    <option value="rating" {% if sort == 'rating' %}selected{% endif %}>Highest Rated</option>
+                    <option value="popular" {% if sort == 'popular' %}selected{% endif %}>Most Popular</option>
+                    <option value="title" {% if sort == 'title' %}selected{% endif %}>A-Z</option>
+                </select>
+            </div>
+            
+            <div class="results-count">
+                {{ pagination.total }} comics found
+            </div>
+        </div>
+    </form>
+    
+    <!-- Comics Grid -->
+    {% if comics %}
+    <div class="comics-grid">
+        {% for comic in comics %}
+        <div class="comic-card">
+            <div class="cover-wrapper">
+                <img src="{{ comic.cover_image or '/static/images/placeholder.png' }}" 
+                     alt="{{ comic.title }}" 
+                     class="cover-image"
+                     loading="lazy">
+                <div class="cover-overlay"></div>
+                
+                <div class="card-badges">
+                    {% if comic.created_at and (now - comic.created_at).days < 7 %}
+                    <span class="badge badge-new">New</span>
+                    {% endif %}
+                    {% if comic.view_count and comic.view_count > 1000 %}
+                    <span class="badge badge-hot">Hot</span>
+                    {% endif %}
+                </div>
+                
+                <div class="card-actions">
+                    <button class="action-btn" title="Add to Library" onclick="toggleLibrary({{ comic.id }}, this)">
+                        <i class="fas fa-bookmark"></i>
+                    </button>
+                    <button class="action-btn" title="Share" onclick="shareComic({{ comic.id }})">
+                        <i class="fas fa-share-alt"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="card-body">
+                <h3 class="card-title">
+                    <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}">{{ comic.title }}</a>
+                </h3>
+                <div class="card-meta">
+                    <div class="card-rating">
+                        <i class="fas fa-star"></i>
+                        <span>{{ "%.1f"|format(comic.average_rating or 0) }}</span>
+                    </div>
+                    {% if comic.author %}
+                    <span class="card-author">{{ comic.author }}</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <!-- Pagination -->
+    {% if pagination.pages > 1 %}
+    <div class="pagination-wrapper">
+        <ul class="pagination">
+            {% if pagination.has_prev %}
+            <li class="page-item">
+                <a href="{{ url_for('main.discover', page=pagination.prev_num, q=query, category=selected_category, sort=sort) }}" 
+                   class="page-link">
+                    <i class="fas fa-chevron-left"></i>
+                </a>
+            </li>
+            {% endif %}
+            
+            {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                {% if p %}
+                    <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                        <a href="{{ url_for('main.discover', page=p, q=query, category=selected_category, sort=sort) }}" 
+                           class="page-link">{{ p }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if pagination.has_next %}
+            <li class="page-item">
+                <a href="{{ url_for('main.discover', page=pagination.next_num, q=query, category=selected_category, sort=sort) }}" 
+                   class="page-link">
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+    </div>
+    {% endif %}
+    
+    {% else %}
+    <!-- Empty State -->
+    <div class="empty-state">
+        <i class="fas fa-compass"></i>
+        <h3>No comics found</h3>
+        <p>Try adjusting your search or filters</p>
+        
+        <div class="quick-actions">
+            <a href="{{ url_for('main.discover') }}" class="quick-action-btn">
+                <i class="fas fa-redo"></i>
+                Clear Filters
+            </a>
+            <button class="quick-action-btn" onclick="randomComic()">
+                <i class="fas fa-dice"></i>
+                Random Comic
+            </button>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Toggle library
+async function toggleLibrary(comicId, btn) {
+    {% if current_user.is_authenticated %}
+    try {
+        const response = await fetch('/api/toggle_library', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comic_id: comicId })
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            const icon = btn.querySelector('i');
+            if (data.action === 'added') {
+                icon.classList.remove('fa-bookmark');
+                icon.classList.add('fa-bookmark-check');
+                btn.style.color = '#8b5cf6';
+            } else {
+                icon.classList.remove('fa-bookmark-check');
+                icon.classList.add('fa-bookmark');
+                btn.style.color = '';
+            }
+            showToast(data.message, 'success');
+        }
+    } catch (error) {
+        showToast('Error updating library', 'error');
+    }
+    {% else %}
+    window.location.href = '{{ url_for("auth.login") }}';
+    {% endif %}
+}
+
+// Share comic
+async function shareComic(comicId) {
+    try {
+        const response = await fetch(`/api/comics/${comicId}`);
+        const data = await response.json();
+        
+        if (data.success && navigator.share) {
+            navigator.share({
+                title: data.comic.title,
+                text: 'Check out this comic!',
+                url: window.location.origin + data.comic.url
+            });
+        } else {
+            navigator.clipboard.writeText(window.location.href);
+            showToast('Link copied to clipboard!', 'success');
+        }
+    } catch (error) {
+        showToast('Error sharing comic', 'error');
+    }
+}
+
+// Random comic
+async function randomComic() {
+    try {
+        const response = await fetch('/api/comics/random');
+        const data = await response.json();
+        
+        if (data.success) {
+            window.location.href = data.comic.url;
+        } else {
+            showToast(data.message, 'error');
+        }
+    } catch (error) {
+        showToast('Error loading random comic', 'error');
+    }
+}
+
+// Toast notification
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast-notification toast-${type}`;
+    toast.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i> ${message}`;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// Search history (localStorage)
+const searchHistoryKey = 'comicvault_search_history';
+const maxHistoryItems = 10;
+
+function saveSearchHistory(query) {
+    if (!query || query.length < 2) return;
+    
+    let history = JSON.parse(localStorage.getItem(searchHistoryKey) || '[]');
+    
+    // Remove if exists
+    history = history.filter(item => item.toLowerCase() !== query.toLowerCase());
+    
+    // Add to beginning
+    history.unshift(query);
+    
+    // Limit size
+    history = history.slice(0, maxHistoryItems);
+    
+    localStorage.setItem(searchHistoryKey, JSON.stringify(history));
+}
+
+function getSearchHistory() {
+    return JSON.parse(localStorage.getItem(searchHistoryKey) || '[]');
+}
+
+function clearSearchHistory() {
+    localStorage.removeItem(searchHistoryKey);
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.querySelector('input[name="q"]');
+    
+    if (searchInput) {
+        // Save search on submit
+        searchInput.closest('form').addEventListener('submit', function() {
+            if (searchInput.value) {
+                saveSearchHistory(searchInput.value.trim());
+            }
+        });
+        
+        // Show search history dropdown
+        searchInput.addEventListener('focus', function() {
+            const history = getSearchHistory();
+            if (history.length > 0) {
+                showSearchHistory(history);
+            }
+        });
+    }
+});
+
+function showSearchHistory(history) {
+    // Remove existing dropdown
+    const existing = document.querySelector('.search-history-dropdown');
+    if (existing) existing.remove();
+    
+    const dropdown = document.createElement('div');
+    dropdown.className = 'search-history-dropdown';
+    dropdown.innerHTML = `
+        <div class="history-header">
+            <span>Recent Searches</span>
+            <button type="button" class="clear-history" onclick="clearSearchHistory(); location.reload();">
+                Clear
+            </button>
+        </div>
+        <ul class="history-list">
+            ${history.map(item => `
+                <li>
+                    <button type="button" class="history-item" onclick="selectHistoryItem(this)">
+                        <i class="fas fa-history"></i>
+                        <span>${item}</span>
+                    </button>
+                </li>
+            `).join('')}
+        </ul>
+    `;
+    
+    // Position dropdown
+    const searchBox = document.querySelector('.discover-search .search-box');
+    dropdown.style.cssText = `
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        margin-top: 0.5rem;
+        background: #2a2a2a;
+        border-radius: 1rem;
+        padding: 0.5rem;
+        z-index: 1000;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    `;
+    
+    searchBox.style.position = 'relative';
+    searchBox.appendChild(dropdown);
+    
+    // Add styles
+    const style = document.createElement('style');
+    style.textContent = `
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0.75rem;
+            color: #a0a0a0;
+            font-size: 0.85rem;
+        }
+        .clear-history {
+            background: none;
+            border: none;
+            color: #8b5cf6;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .clear-history:hover {
+            text-decoration: underline;
+        }
+        .history-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .history-list li {
+            margin: 0;
+        }
+        .history-item {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            background: none;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 0.5rem;
+            text-align: left;
+            font-size: 0.95rem;
+        }
+        .history-item:hover {
+            background: rgba(139, 92, 246, 0.2);
+        }
+        .history-item i {
+            color: #6c757d;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function selectHistoryItem(btn) {
+    const query = btn.querySelector('span').textContent;
+    document.querySelector('input[name="q"]').value = query;
+    document.querySelector('.search-history-dropdown')?.remove();
+}
+
+// Search History (localStorage)
+function saveSearchHistory(query) {
+    if (!query || query.length < 2) return;
+    
+    let history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+    history = history.filter(item => item.toLowerCase() !== query.toLowerCase());
+    history.unshift(query);
+    history = history.slice(0, 10); // Keep only 10 items
+    localStorage.setItem('searchHistory', JSON.stringify(history));
+}
+
+function getSearchHistory() {
+    return JSON.parse(localStorage.getItem('searchHistory') || '[]');
+}
+
+function clearSearchHistory() {
+    localStorage.removeItem('searchHistory');
+}
+
+// Save search on form submit
+document.querySelector('.discover-search form')?.addEventListener('submit', function(e) {
+    const query = this.querySelector('input[name="q"]').value;
+    saveSearchHistory(query);
+});
+</script>
+{% endblock %}

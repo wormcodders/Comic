@@ -1,0 +1,261 @@
+{# Ad Component - Uses database ads or falls back to placeholder #}
+{% macro ad_banner(placement='header', id=None) %}
+{% if active_ads and placement in active_ads %}
+    {% set ad = active_ads[placement] %}
+    <div class="ad-container ad-{{ placement }}" data-placement="{{ placement }}" data-ad-id="{{ ad.id }}">
+        {% if ad.banner_link %}
+            <a href="{{ ad.target_url or '#' }}" target="_blank" rel="noopener noreferrer" class="ad-banner-link">
+                <img src="{{ ad.banner_link }}" alt="{{ ad.title }}" class="ad-banner-img" 
+                     onerror="this.style.display='none'; this.parentElement.parentElement.querySelector('.ad-fallback').style.display='flex';">
+            </a>
+            <div class="ad-fallback" style="display: none;">
+                <span class="ad-label">Advertisement</span>
+                <div class="ad-content">
+                    <i class="fas fa-ad"></i>
+                    <span>{{ ad.title }}</span>
+                </div>
+            </div>
+        {% elif ad.ad_code %}
+            <div class="ad-custom-code">
+                {{ ad.ad_code|safe }}
+            </div>
+        {% else %}
+            <div class="ad-placeholder">
+                <span class="ad-label">Advertisement</span>
+                <div class="ad-content">
+                    <i class="fas fa-ad"></i>
+                    <span>{{ placement|title }} Ad Space</span>
+                    <small>{{ placement_size(placement) }}</small>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+{% else %}
+    {# Fallback placeholder when no active ad #}
+    <div class="ad-container ad-{{ placement }}" data-placement="{{ placement }}">
+        <div class="ad-placeholder">
+            <span class="ad-label">Advertisement</span>
+            <div class="ad-content">
+                <i class="fas fa-ad"></i>
+                <span>{{ placement|title }} Ad Space</span>
+                <small>{{ placement_size(placement) }}</small>
+            </div>
+        </div>
+    </div>
+{% endif %}
+{% endmacro %}
+
+{% macro ad_sidebar() %}
+{{ ad_banner('sidebar') }}
+{% endmacro %}
+
+{% macro ad_in_content() %}
+{{ ad_banner('in-content') }}
+{% endmacro %}
+
+{% macro ad_footer() %}
+{{ ad_banner('footer') }}
+{% endmacro %}
+
+{% macro ad_comic_detail() %}
+{{ ad_banner('comic-detail') }}
+{% endmacro %}
+
+{%- macro placement_size(placement) -%}
+{%- if placement == 'header' -%}728x90 or 970x250{%- elif placement == 'sidebar' -%}300x600 or 300x250{%- elif placement == 'footer' -%}728x90{%- elif placement == 'in-content' -%}Responsive{%- elif placement == 'comic-detail' -%}300x250 or Responsive{%- else -%}Standard{%- endif -%}
+{%- endmacro -%}
+
+<style>
+.ad-container {
+    margin: 1rem 0;
+}
+
+{% macro ad_comic_detail() %}
+{{ ad_banner('comic-detail') }}
+{% endmacro %}
+
+{% macro ad_native(title='Sponsored Content') %}
+<div class="ad-container ad-native">
+    <span class="ad-label">{{ title }}</span>
+    <div class="ad-native-content">
+        {% if active_ads and 'native' in active_ads %}
+            {% set ad = active_ads['native'] %}
+            {% if ad.banner_link %}
+                <a href="{{ ad.target_url or '#' }}" target="_blank" rel="noopener noreferrer" class="ad-native-card">
+                    <img src="{{ ad.banner_link }}" alt="{{ ad.title }}" class="ad-native-img">
+                    <div class="ad-native-text">
+                        <h4>{{ ad.title }}</h4>
+                        <p>{{ ad.description or 'Learn more' }}</p>
+                    </div>
+                </a>
+            {% elif ad.ad_code %}
+                {{ ad.ad_code|safe }}
+            {% else %}
+                <div class="ad-placeholder ad-native-placeholder">
+                    <i class="fas fa-ad"></i>
+                    <span>{{ title }}</span>
+                    <small>Native Ad Space</small>
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="ad-placeholder ad-native-placeholder">
+                <i class="fas fa-ad"></i>
+                <span>{{ title }}</span>
+                <small>Native Ad Space</small>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endmacro %}
+
+}
+
+.ad-sidebar {
+    margin: 1rem auto;
+    max-width: 300px;
+}
+
+.ad-footer {
+    text-align: center;
+    padding: 1rem 0;
+}
+
+.ad-comic-detail {
+    margin: 1.5rem 0;
+    text-align: center;
+}
+
+.ad-placeholder {
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--card-bg) 100%);
+    border: 2px dashed var(--border-color);
+    border-radius: 8px;
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-muted);
+    transition: all 0.3s ease;
+}
+
+.ad-placeholder:hover {
+    border-color: var(--primary-color);
+    background: linear-gradient(135deg, var(--card-bg) 0%, var(--bg-secondary) 100%);
+}
+
+.ad-label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 0.75rem;
+    color: var(--text-muted);
+}
+
+.ad-content i {
+    font-size: 2rem;
+    display: block;
+    margin-bottom: 0.5rem;
+    opacity: 0.6;
+}
+
+.ad-content span {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+}
+
+.ad-content small {
+    font-size: 0.75rem;
+    opacity: 0.7;
+}
+
+.ad-banner-link {
+    display: block;
+    text-decoration: none;
+}
+
+.ad-banner-img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    display: block;
+    margin: 0 auto;
+}
+
+.ad-fallback {
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--card-bg) 100%);
+    border: 2px dashed var(--border-color);
+    border-radius: 8px;
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.ad-custom-code {
+.ad-custom-code {
+    text-align: center;
+}
+
+/* Native Ad Styles */
+.ad-native {
+    margin: 2rem 0;
+}
+
+.ad-native-content {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.ad-native-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.2s ease;
+}
+
+.ad-native-card:hover {
+    transform: translateY(-2px);
+}
+
+.ad-native-img {
+    width: 120px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.ad-native-text h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.ad-native-text p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.ad-native-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+}
+
+@media (max-width: 576px) {
+    .ad-native-card {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .ad-native-img {
+        width: 100%;
+        height: 150px;
+    }
+}
+</style>

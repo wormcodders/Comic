@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block title %}Register - ComicVault{% endblock %}
+
+{% block extra_css %}
+<style>
+    .auth-container {
+        max-width: 480px;
+        width: 95%;
+        margin: 3rem auto;
+    }
+    
+    .auth-card {
+        background: var(--card-bg);
+        border-radius: 16px;
+        padding: 2.25rem;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+    }
+    
+    .auth-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    
+    .auth-header h2 {
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+    
+    .auth-header p {
+        color: var(--text-muted);
+    }
+    
+    .form-floating {
+        margin-bottom: 1.15rem;
+    }
+    
+    .form-floating > label {
+        color: var(--text-muted);
+        font-size: 0.86rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: calc(100% - 1.5rem);
+        padding: 1rem 0.85rem;
+    }
+    
+    .form-floating > .form-control {
+        font-size: 0.95rem;
+        padding-left: 0.85rem;
+    }
+    
+    .btn-auth {
+        width: 100%;
+        padding: 0.875rem;
+        font-weight: 600;
+        margin-top: 1.25rem;
+        font-size: 1rem;
+    }
+    
+    .auth-footer {
+        text-align: center;
+        margin-top: 1.75rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border-color);
+    }
+    
+    .password-strength {
+        height: 4px;
+        background: var(--border-color);
+        border-radius: 2px;
+        margin: 0.5rem 0 0.35rem;
+        overflow: hidden;
+    }
+    
+    .password-strength-bar {
+        height: 100%;
+        width: 0;
+        transition: all 0.3s;
+    }
+    
+    .password-strength-bar.weak { width: 33%; background: #dc3545; }
+    .password-strength-bar.medium { width: 66%; background: #ffc107; }
+    .password-strength-bar.strong { width: 100%; background: #198754; }
+    
+    .password-hint {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin-top: 0.4rem;
+        margin-bottom: 1.15rem;
+        padding-left: 0.25rem;
+        line-height: 1.4;
+    }
+    
+    .field-hint {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin-top: 0.5rem;
+        margin-bottom: 1.25rem;
+        padding-left: 0.25rem;
+        line-height: 1.4;
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+    }
+    
+    .form-check {
+        padding-left: 1.85rem;
+    }
+    
+    .form-check-input {
+        cursor: pointer;
+    }
+    
+    .form-check-label {
+        font-size: 0.88rem;
+        color: var(--text-color, #e0e0e0);
+        cursor: pointer;
+        user-select: none;
+    }
+    
+    .alert {
+        margin-bottom: 1.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <i class="fas fa-book-open fa-3x text-primary mb-3"></i>
+            <h2>Create Account</h2>
+            <p>Join ComicVault today</p>
+        </div>
+        
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <form method="POST" onsubmit="return validateForm()">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            
+            <!-- Username -->
+            <div class="form-floating">
+                <input type="text" class="form-control" id="username" name="username" placeholder="Username" 
+                       required pattern="^[a-zA-Z0-9_-]{3,20}$" minlength="3" maxlength="20"
+                       title="3-20 characters: letters, numbers, underscores, and hyphens">
+                <label for="username"><i class="fas fa-user me-2"></i>Username (3-20 characters)</label>
+            </div>
+            
+            <!-- Email -->
+            <div class="form-floating">
+                <input type="email" class="form-control" id="email" name="email" placeholder="Email" 
+                       required maxlength="50"
+                       title="Valid email address (max 50 characters)">
+                <label for="email"><i class="fas fa-envelope me-2"></i>Email address</label>
+            </div>
+            
+            <!-- Password -->
+            <div class="form-floating mb-1">
+                <input type="password" class="form-control" id="password" name="password" placeholder="Password" 
+                       required minlength="8" maxlength="32" oninput="updatePasswordStrength()">
+                <label for="password"><i class="fas fa-lock me-2"></i>Password (8-32 characters)</label>
+            </div>
+            
+            <div class="password-strength">
+                <div id="passwordStrengthBar" class="password-strength-bar"></div>
+            </div>
+            <p class="password-hint">8-32 characters, must include at least 1 letter and 1 number</p>
+            
+            <!-- Confirm Password -->
+            <div class="form-floating">
+                <input type="password" class="form-control" id="confirm_password" name="confirm_password" placeholder="Confirm Password" 
+                       required minlength="8" maxlength="32">
+                <label for="confirm_password"><i class="fas fa-lock me-2"></i>Confirm Password</label>
+            </div>
+
+            <!-- Security Question Field -->
+            <div class="form-floating">
+                <input type="text" class="form-control" id="security_answer" name="security_answer" 
+                       placeholder="Favourite TV Show" required 
+                       pattern="^[a-zA-Z0-9 ]{1,20}$" maxlength="20"
+                       title="Letters, numbers, and spaces only (max 20 characters)">
+                <label for="security_answer"><i class="fas fa-tv me-2"></i>What is Your Childhood's Favourite TV Show?</label>
+            </div>
+            <p class="field-hint"><i class="fas fa-shield-alt text-primary"></i>Used for password recovery: letters, numbers, and spaces only (max 20 chars)</p>
+            
+            <!-- 18+ Confirmation Checkbox -->
+            <div class="form-check mb-2">
+                <input type="checkbox" class="form-check-input" id="age_confirm" name="age_confirm" value="1" required>
+                <label class="form-check-label" for="age_confirm">
+                    I Confirm that, I am 18+
+                </label>
+            </div>
+
+            <!-- Terms Checkbox -->
+            <div class="form-check mb-3">
+                <input type="checkbox" class="form-check-input" id="terms" name="terms" required>
+                <label class="form-check-label" for="terms">
+                    I agree to the <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>
+                </label>
+            </div>
+            
+            <button type="submit" class="btn btn-primary btn-auth">
+                <i class="fas fa-user-plus me-2"></i>Create Account
+            </button>
+        </form>
+        
+        <div class="auth-footer">
+            Already have an account? <a href="{{ url_for('main.login') }}">Sign in</a>
+        </div>
+    </div>
+</div>
+
+<script>
+function updatePasswordStrength() {
+    const password = document.getElementById('password').value;
+    const bar = document.getElementById('passwordStrengthBar');
+    
+    bar.className = 'password-strength-bar';
+    
+    if (password.length === 0) {
+        bar.style.width = '0%';
+    } else if (password.length < 8) {
+        bar.classList.add('weak');
+    } else if (password.length < 12) {
+        bar.classList.add('medium');
+    } else {
+        bar.classList.add('strong');
+    }
+}
+
+function validateForm() {
+    const username = document.getElementById('username').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const confirm = document.getElementById('confirm_password').value;
+    const securityAnswer = document.getElementById('security_answer').value.trim();
+    const ageConfirm = document.getElementById('age_confirm');
+    
+    // Username regex: 3-20 chars alphanumeric, _, -
+    const userRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+    if (!userRegex.test(username)) {
+        alert('Username must be 3-20 characters long and can only contain letters, numbers, underscores, and hyphens.');
+        return false;
+    }
+    
+    // Email regex: max 50 chars
+    const emailRegex = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/;
+    if (email.length > 50 || !emailRegex.test(email)) {
+        alert('Please enter a valid email address (maximum 50 characters).');
+        return false;
+    }
+    
+    // Password regex: 8-32 chars, at least 1 letter and 1 number
+    const passRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9!@#$%^&*()_+\-=[\]{}|;:,.<>?]{8,32}$/;
+    if (!passRegex.test(password)) {
+        alert('Password must be 8-32 characters and contain at least one letter and one number.');
+        return false;
+    }
+    
+    if (password !== confirm) {
+        alert('Passwords do not match.');
+        return false;
+    }
+    
+    // Security question regex: 1-20 chars alphabet, number, space
+    const answerRegex = /^[a-zA-Z0-9 ]{1,20}$/;
+    if (!answerRegex.test(securityAnswer) || securityAnswer.length === 0) {
+        alert("Please answer the security question (1-20 characters, letters, numbers, and spaces only).");
+        return false;
+    }
+    
+    // 18+ Confirmation check
+    if (!ageConfirm || !ageConfirm.checked) {
+        alert('Please confirm that you are 18+ to create an account.');
+        return false;
+    }
+    
+    return true;
+}
+</script>
+{% endblock %}

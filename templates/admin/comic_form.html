@@ -1,0 +1,405 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{% if comic %}Edit Comic{% else %}Add Comic{% endif %} - Admin - ComicVault{% endblock %}
+
+{% block admin_content %}
+<div class="admin-header">
+    <h1>
+        <i class="fas fa-book me-2"></i>
+        {% if comic %}Edit Comic{% else %}Add New Comic{% endif %}
+    </h1>
+    <a href="{{ url_for('main.admin_comics') }}" class="btn btn-outline-secondary">
+        <i class="fas fa-arrow-left me-2"></i>Back to List
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <form method="POST" enctype="multipart/form-data" class="admin-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <!-- Basic Info -->
+            <div class="form-section">
+                <h3 class="form-section-title"><i class="fas fa-info-circle me-2"></i>Basic Information</h3>
+                
+                <div class="mb-3">
+                    <label for="title" class="form-label">Title *</label>
+                    <input type="text" class="form-control" id="title" name="title" 
+                           value="{{ comic.title if comic else '' }}" required>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="author" class="form-label">Author</label>
+                        <input type="text" class="form-control" id="author" name="author" 
+                               value="{{ comic.author if comic else '' }}">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="artist" class="form-label">Artist</label>
+                        <input type="text" class="form-control" id="artist" name="artist" 
+                               value="{{ comic.artist if comic else '' }}">
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="episode" class="form-label">Episode / Chapter</label>
+                    <input type="text" class="form-control" id="episode" name="episode" 
+                           value="{{ comic.episode if comic else '' }}" placeholder="e.g. Episode 1, Chapter 5">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="summary" class="form-label">Summary</label>
+                    <textarea class="form-control" id="summary" name="summary" rows="4">{{ comic.summary if comic else '' }}</textarea>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="original_language" class="form-label">Original Language</label>
+                        <select class="form-select" id="original_language" name="original_language">
+                            <option value="en" {% if comic and comic.original_language == 'en' %}selected{% endif %}>English</option>
+                            <option value="ja" {% if comic and comic.original_language == 'ja' %}selected{% endif %}>Japanese</option>
+                            <option value="ko" {% if comic and comic.original_language == 'ko' %}selected{% endif %}>Korean</option>
+                            <option value="zh" {% if comic and comic.original_language == 'zh' %}selected{% endif %}>Chinese</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="status" class="form-label">Status</label>
+                        <select class="form-select" id="status" name="status">
+                            <option value="active" {% if comic and comic.status == 'active' %}selected{% endif %}>Active</option>
+                            <option value="completed" {% if comic and comic.status == 'completed' %}selected{% endif %}>Completed</option>
+                            <option value="hiatus" {% if comic and comic.status == 'hiatus' %}selected{% endif %}>Hiatus</option>
+                            <option value="cancelled" {% if comic and comic.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Categories & Tags -->
+            <div class="form-section">
+                <h3 class="form-section-title"><i class="fas fa-tags me-2"></i>Categories & Tags</h3>
+                
+                <div class="mb-3">
+                    <label class="form-label">Categories</label>
+                    <div class="category-checkboxes">
+                        {% for category in categories %}
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="categories" 
+                                   value="{{ category.id }}" id="cat{{ category.id }}"
+                                   {% if comic and category in comic.categories %}checked{% endif %}>
+                            <label class="form-check-label" for="cat{{ category.id }}">{{ category.name }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="tags" class="form-label">Tags (comma separated)</label>
+                    <input type="text" class="form-control" id="tags" name="tags" 
+                           value="{{ comic_tags if comic else '' }}" 
+                           placeholder="e.g. action, fantasy, adventure">
+                </div>
+            </div>
+            
+            <!-- Cover Image -->
+            <div class="form-section">
+                <h3 class="form-section-title"><i class="fas fa-image me-2"></i>Cover Image</h3>
+                
+                {% if comic and comic.cover_url %}
+                <div class="current-cover mb-3">
+                    <p class="text-muted">Current cover:</p>
+                    <img src="{{ comic.cover_url }}" alt="Current cover" style="max-width: 200px; border-radius: 8px;">
+                </div>
+                {% endif %}
+                
+                <div class="mb-3">
+                    <label for="cover" class="form-label">{{ 'Replace Cover' if comic and comic.cover_url else 'Upload Cover' }}</label>
+                    <input type="file" class="form-control" id="cover" name="cover" accept="image/*">
+                    <small class="text-muted">Recommended size: 400x600px. Max size: 5MB.</small>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="cover_url" class="form-label">Or enter Cover URL</label>
+                    <input type="url" class="form-control" id="cover_url" name="cover_url" 
+                           value="{{ comic.cover_url if comic else '' }}"
+                           placeholder="https://example.com/cover.jpg">
+                </div>
+            </div>
+            
+            <!-- PDF Settings -->
+            <div class="form-section">
+                <h3 class="form-section-title"><i class="fas fa-file-pdf me-2"></i>PDF & Download Links</h3>
+                
+                <input type="hidden" id="hiddenLocalPath" value="{{ comic.pdf_file if comic else '' }}">
+                
+                <div class="mb-3">
+                    <label for="download_link" class="form-label">
+                        <i class="fas fa-cloud-download-alt me-1"></i>Download Link 
+                        {% if comic and comic.pdf_file %}
+                        <span class="text-muted">(Click 'Fetch' to upload locally saved PDF to UpFiles)</span>
+                        {% endif %}
+                    </label>
+                    <div class="input-group">
+                        <input type="url" class="form-control" id="download_link" name="download_link" 
+                               value="{{ comic.download_link if comic else '' }}"
+                               placeholder="https://upfiles.com/...">
+                        {% if comic and comic.pdf_file %}
+                        <button class="btn btn-outline-primary" type="button" id="uploadToHostBtn" title="Upload locally saved file to UpFiles" {% if comic.download_link %}disabled{% endif %}>
+                            <i class="fas fa-cloud-upload-alt me-1"></i>Fetch URL
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- AI Auto-Fill -->
+            <div class="form-section ai-section">
+                <h3 class="form-section-title"><i class="fas fa-robot me-2"></i>AI Auto-Fill</h3>
+                <p class="text-muted mb-3">Upload a cover image and let AI extract metadata automatically.</p>
+                
+                <div class="input-group mb-3">
+                    <input type="file" class="form-control" id="ai_cover" accept="image/*">
+                    <button class="btn btn-outline-primary" type="button" onclick="extractWithAI()">
+                        <i class="fas fa-magic me-2"></i>Extract Metadata
+                    </button>
+                </div>
+                <div id="aiStatus" class="ai-status" style="display: none;"></div>
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-lg">
+                    <i class="fas fa-save me-2"></i>
+                    {% if comic %}Update Comic{% else %}Create Comic{% endif %}
+                </button>
+                <a href="{{ url_for('main.admin_comics') }}" class="btn btn-outline-secondary btn-lg">Cancel</a>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Sidebar -->
+    <div class="col-lg-4">
+        <!-- Publish Settings -->
+        <div class="form-section">
+            <h3 class="form-section-title"><i class="fas fa-cog me-2"></i>Publish Settings</h3>
+            
+            <div class="mb-3">
+                <label for="slug" class="form-label">URL Slug</label>
+                <input type="text" class="form-control" id="slug" name="slug" 
+                       value="{{ comic.slug if comic else '' }}"
+                       placeholder="auto-generated-from-title">
+                <small class="text-muted">Leave empty to auto-generate from title</small>
+            </div>
+            
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="is_featured" name="is_featured" value="1"
+                           {% if comic and comic.is_featured %}checked{% endif %}>
+                    <label class="form-check-label" for="is_featured">Featured Comic</label>
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="is_adult" name="is_adult" value="1"
+                           {% if comic and comic.is_adult %}checked{% endif %}>
+                    <label class="form-check-label" for="is_adult">Adult Content (18+)</label>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Alternative Names -->
+        <div class="form-section">
+            <h3 class="form-section-title"><i class="fas fa-language me-2"></i>Alternative Names</h3>
+            <div class="mb-3">
+                <textarea class="form-control" name="alternative_titles" rows="3" 
+                          placeholder="One title per line">{{ comic.alternative_titles if comic else '' }}</textarea>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.admin-form {
+    max-width: none;
+}
+
+.form-section {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.form-section-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.form-label {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.form-control, .form-select {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.form-control:focus, .form-select:focus {
+    background: var(--input-bg);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.category-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    padding-top: 1rem;
+}
+
+.ai-section {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+    border: 1px dashed var(--primary-color);
+}
+
+.ai-status {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+}
+
+.ai-status.loading {
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--primary-color);
+}
+
+.ai-status.success {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+}
+
+.ai-status.error {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+</style>
+
+<script>
+async function extractWithAI() {
+    const fileInput = document.getElementById('ai_cover');
+    const statusDiv = document.getElementById('aiStatus');
+    
+    if (!fileInput.files[0]) {
+        alert('Please select an image first');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('image', fileInput.files[0]);
+    
+    statusDiv.style.display = 'block';
+    statusDiv.className = 'ai-status loading';
+    statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Analyzing image...';
+    
+    try {
+        const response = await fetch('/api/ai/extract_metadata', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            statusDiv.className = 'ai-status success';
+            statusDiv.innerHTML = '<i class="fas fa-check-circle me-2"></i>Metadata extracted!';
+            
+            // Auto-fill form fields
+            if (data.title) document.getElementById('title').value = data.title;
+            if (data.episode) document.getElementById('episode').value = data.episode;
+            if (data.author) document.getElementById('author').value = data.author;
+            if (data.summary) document.getElementById('summary').value = data.summary;
+            if (data.tags) document.getElementById('tags').value = data.tags.join(', ');
+            if (data.language) document.getElementById('original_language').value = data.language;
+            
+            setTimeout(() => statusDiv.style.display = 'none', 3000);
+        } else {
+            throw new Error(data.error || 'Failed to extract metadata');
+        }
+    } catch (error) {
+        statusDiv.className = 'ai-status error';
+        statusDiv.innerHTML = '<i class="fas fa-times-circle me-2"></i>' + error.message;
+    }
+}
+
+// Auto-generate slug from title
+document.getElementById('title').addEventListener('input', function() {
+    const slugInput = document.getElementById('slug');
+    if (!slugInput.dataset.manual) {
+        slugInput.value = this.value
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '');
+    }
+});
+
+document.getElementById('slug').addEventListener('input', function() {
+    this.dataset.manual = 'true';
+});
+
+// Manual upload to host
+const uploadToHostBtn = document.getElementById('uploadToHostBtn');
+if (uploadToHostBtn) {
+    uploadToHostBtn.addEventListener('click', async () => {
+        const localPath = document.getElementById('hiddenLocalPath').value;
+        if (!localPath) {
+            alert('No local file path found. Ensure a PDF is saved first.');
+            return;
+        }
+        
+        uploadToHostBtn.disabled = true;
+        uploadToHostBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading...';
+        
+        try {
+            const response = await fetch('/admin/upload_to_host', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ local_path: localPath })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                document.getElementById('download_link').value = result.upfiles_url;
+                uploadToHostBtn.innerHTML = '<i class="fas fa-check me-2"></i>Done';
+                // Show notification if available
+                if (typeof showSuccess === 'function') {
+                    showSuccess('File successfully uploaded to UpFiles!');
+                } else {
+                    alert('File successfully uploaded to UpFiles!');
+                }
+            } else {
+                throw new Error(result.message || 'Upload failed');
+            }
+        } catch (error) {
+            console.error('Manual upload error:', error);
+            if (typeof showError === 'function') {
+                showError('Error: ' + error.message);
+            } else {
+                alert('Error: ' + error.message);
+            }
+            uploadToHostBtn.disabled = false;
+            uploadToHostBtn.innerHTML = '<i class="fas fa-cloud-upload-alt me-1"></i>Fetch URL';
+        }
+    });
+}
+</script>
+{% endblock %}

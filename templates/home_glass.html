@@ -1,0 +1,468 @@
+{% extends "base.html" %}
+{% from 'components/ad_placeholder.html' import ad_banner, ad_in_content, ad_native %}
+
+{% block title %}Read Comics Online Free | ComicVault - Best Digital Comic Reader{% endblock %}
+
+{% block meta_description %}ComicVault - Read thousands of comics, manga, and graphic novels online for free. Discover new releases, trending comics, and build your personal library.{% endblock %}
+{% block meta_keywords %}read comics online, free comics, manga reader, graphic novels, digital comics, comic vault, online comic reader{% endblock %}
+
+{% block og_title %}ComicVault - Read Comics Online Free{% endblock %}
+{% block og_description %}Discover thousands of comics, manga, and graphic novels. Free to read, anytime, anywhere.{% endblock %}
+
+{% block extra_css %}
+<style>
+    .hero-section {
+        background: linear-gradient(135deg, rgba(255, 107, 53, 0.85) 0%, rgba(139, 92, 246, 0.85) 100%);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        color: white;
+        padding: 4rem 0;
+        margin-bottom: 3rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .hero-section::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        right: -20%;
+        width: 60%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.2) 0%, transparent 70%);
+        pointer-events: none;
+    }
+    
+    .hero-title {
+        font-size: 3rem;
+        font-weight: 800;
+        margin-bottom: 1rem;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    }
+    
+    .hero-subtitle {
+        font-size: 1.25rem;
+        opacity: 0.95;
+        margin-bottom: 2rem;
+    }
+    
+    .hero-search {
+        max-width: 600px;
+    }
+    
+    .hero-search input {
+        padding: 1rem 1.5rem;
+        border-radius: 50px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        font-size: 1rem;
+        background: rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(10px);
+        color: white;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+    
+    .hero-search input::placeholder {
+        color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .hero-search button {
+        border-radius: 50px;
+        padding: 1rem 2rem;
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        backdrop-filter: blur(10px);
+        color: white;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+    
+    .hero-search button:hover {
+        background: rgba(255, 255, 255, 0.35);
+        transform: scale(1.05);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+    }
+    
+    .section-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .section-title i {
+        color: var(--primary-color);
+        filter: drop-shadow(0 2px 4px rgba(255, 107, 53, 0.3));
+    }
+    
+    .comic-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 1.5rem;
+    }
+    
+    .comic-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 16px;
+        overflow: hidden;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        text-decoration: none;
+        color: inherit;
+        box-shadow: 0 8px 32px rgba(31, 38, 135, 0.2);
+        position: relative;
+    }
+    
+    .comic-card:hover {
+        transform: translateY(-8px) scale(1.02);
+        border-color: rgba(255, 255, 255, 0.25);
+        box-shadow: 
+            0 20px 40px rgba(31, 38, 135, 0.3),
+            0 0 30px rgba(255, 107, 53, 0.2);
+    }
+    
+    .comic-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 50%;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, transparent 100%);
+        pointer-events: none;
+        z-index: 1;
+    }
+    
+    .comic-card-cover {
+        position: relative;
+        aspect-ratio: 2/3;
+        background: var(--darker-bg);
+        overflow: hidden;
+    }
+    
+    .comic-card-cover img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.4s ease;
+    }
+    
+    .comic-card:hover .comic-card-cover img {
+        transform: scale(1.05);
+    }
+    
+    .comic-card-cover .placeholder-cover {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-muted);
+        font-size: 3rem;
+    }
+    
+    .comic-card-rating {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+        color: #FFD700;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: 1px solid rgba(255, 215, 0, 0.3);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        z-index: 2;
+    }
+    
+    .comic-card-body {
+        padding: 1rem;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.6) 100%);
+        position: relative;
+        z-index: 2;
+    }
+    
+    .comic-card-title {
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 0.25rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        color: white;
+    }
+    
+    .comic-card-author {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 0.8rem;
+    }
+    
+    .category-card {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+        backdrop-filter: blur(12px);
+        border-radius: 16px;
+        padding: 1.5rem;
+        text-align: center;
+        text-decoration: none;
+        color: inherit;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+    }
+    
+    .category-card:hover {
+        background: linear-gradient(135deg, rgba(255, 107, 53, 0.8), rgba(238, 108, 77, 0.8));
+        color: white;
+        transform: translateY(-8px) scale(1.05);
+        border-color: rgba(255, 255, 255, 0.3);
+        box-shadow: 
+            0 20px 40px rgba(31, 38, 135, 0.25),
+            0 0 30px rgba(255, 107, 53, 0.3);
+    }
+    
+    .category-card i {
+        font-size: 2rem;
+        color: var(--primary-color);
+        margin-bottom: 0.75rem;
+        transition: color 0.3s ease;
+    }
+    
+    .category-card:hover i {
+        color: white;
+    }
+    
+    .category-card h5 {
+        font-weight: 600;
+        margin: 0;
+    }
+    
+    .view-all-link {
+        color: var(--primary-color);
+        text-decoration: none;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        transition: all 0.3s ease;
+    }
+    
+    .view-all-link:hover {
+        color: var(--primary-light);
+        transform: translateX(4px);
+    }
+    
+    .featured-badge {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        background: linear-gradient(135deg, rgba(238, 108, 77, 0.9), rgba(255, 107, 53, 0.9));
+        backdrop-filter: blur(4px);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        z-index: 2;
+    }
+    
+    @media (max-width: 768px) {
+        .hero-title {
+            font-size: 2rem;
+        }
+        
+        .hero-subtitle {
+            font-size: 1rem;
+        }
+        
+        .comic-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<section class="hero-section">
+    <div class="container text-center position-relative" style="z-index: 2;">
+        <h1 class="hero-title">Discover Your Next Favorite Comic</h1>
+        <p class="hero-subtitle">Explore thousands of comics from independent creators and publishers</p>
+        <div class="hero-search mx-auto">
+            <form action="{{ url_for('main.search') }}" method="GET" class="d-flex gap-2">
+                <input type="text" name="q" class="form-control flex-grow-1" placeholder="Search comics, authors, genres...">
+                <button type="submit" class="btn btn-light">
+                    <i class="fas fa-search"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+</section>
+
+<div class="container">
+    <!-- Featured Comics -->
+    {% if featured %}
+    <section class="mb-5">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="section-title">
+                <i class="fas fa-star"></i>
+                Featured Comics
+            </h2>
+            <a href="{{ url_for('main.trending') }}" class="view-all-link">
+                View All <i class="fas fa-chevron-right"></i>
+            </a>
+        </div>
+        <div class="comic-grid">
+            {% for comic in featured[:6] %}
+            <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}" class="comic-card">
+                <div class="comic-card-cover">
+                    {% if comic.cover_url %}
+                        <img src="{{ comic.cover_url }}" 
+                             alt="{{ comic.title }} cover"
+                             loading="lazy"
+                             class="lazy-image"
+                             data-src="{{ comic.cover_url }}">
+                    {% else %}
+                        <div class="placeholder-cover">
+                            <i class="fas fa-image" aria-hidden="true"></i>
+                        </div>
+                    {% endif %}
+                    <span class="comic-card-rating" aria-label="Rating: {{ "%.1f"|format(comic.average_rating or 0) }} stars">
+                        <i class="fas fa-star" aria-hidden="true"></i> {{ "%.1f"|format(comic.average_rating or 0) }}
+                    </span>
+                    {% if loop.index <= 2 %}
+                        <span class="featured-badge">Featured</span>
+                    {% endif %}
+                </div>
+                <div class="comic-card-body">
+                    <h4 class="comic-card-title">{{ comic.title }}</h4>
+                    <p class="comic-card-author">{{ comic.author or 'Unknown' }}</p>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Categories -->
+    <section class="mb-5">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="section-title">
+                <i class="fas fa-th-large"></i>
+                Browse Categories
+            </h2>
+            <a href="{{ url_for('main.categories') }}" class="view-all-link">
+                All Categories <i class="fas fa-chevron-right"></i>
+            </a>
+        </div>
+        <div class="row g-3">
+            {% for category in categories[:8] %}
+            <div class="col-4 col-md-3 col-lg-2">
+                <a href="{{ url_for('main.category_view', slug=category.slug) }}" class="category-card">
+                    <i class="{{ category.icon or 'fas fa-book' }}"></i>
+                    <h5>{{ category.name }}</h5>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <!-- In-Content Ad -->
+    {{ ad_in_content() }}
+
+    <!-- Trending Comics -->
+    {% if trending %}
+    <section class="mb-5">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="section-title">
+                <i class="fas fa-fire"></i>
+                Trending Now
+            </h2>
+            <a href="{{ url_for('main.trending') }}" class="view-all-link">
+                View All <i class="fas fa-chevron-right"></i>
+            </a>
+        </div>
+        <div class="comic-grid">
+            {% for comic in trending[:8] %}
+            <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}" class="comic-card">
+                <div class="comic-card-cover">
+                    {% if comic.cover_url %}
+                        <img class="lazy-image" data-src="{{ comic.cover_url }}" alt="{{ comic.title }}" loading="lazy">
+                    {% else %}
+                        <div class="placeholder-cover">
+                            <i class="fas fa-image"></i>
+                        </div>
+                    {% endif %}
+                    <span class="comic-card-rating">
+                        <i class="fas fa-eye"></i> {{ comic.view_count }}
+                    </span>
+                </div>
+                <div class="comic-card-body">
+                    <h4 class="comic-card-title">{{ comic.title }}</h4>
+                    <p class="comic-card-author">{{ comic.author or 'Unknown' }}</p>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Native Ad -->
+    {{ ad_native('Sponsored Content') }}
+
+    <!-- Recently Added -->
+    {% if recent %}
+    <section class="mb-5">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="section-title">
+                <i class="fas fa-clock"></i>
+                Recently Added
+            </h2>
+        </div>
+        <div class="comic-grid">
+            {% for comic in recent %}
+            <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}" class="comic-card">
+                <div class="comic-card-cover">
+                    {% if comic.cover_url %}
+                        <img class="lazy-image" data-src="{{ comic.cover_url }}" alt="{{ comic.title }}" loading="lazy">
+                    {% else %}
+                        <div class="placeholder-cover">
+                            <i class="fas fa-image"></i>
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="comic-card-body">
+                    <h4 class="comic-card-title">{{ comic.title }}</h4>
+                    <p class="comic-card-author">{{ comic.author or 'Unknown' }}</p>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if not featured and not recent %}
+    <section class="text-center py-5">
+        <div class="glass-card p-5">
+            <i class="fas fa-book-open fa-4x text-muted mb-3"></i>
+            <h3>No comics yet</h3>
+            <p class="text-muted">Check back soon for new content!</p>
+            {% if current_user.is_admin %}
+                <a href="{{ url_for('main.admin_comic_create') }}" class="glass-btn mt-3">
+                    <i class="fas fa-plus me-2"></i>Add First Comic
+                </a>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

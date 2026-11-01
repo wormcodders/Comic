@@ -1,0 +1,22 @@
+[
+    {
+        "timestamp": "2026-10-30T18:44:38.551187",
+        "error_type": "AttributeError",
+        "error_message": "'User' object has no attribute 'avatar'",
+        "url": "http://localhost/api/comics/1/comments",
+        "method": "POST",
+        "query_params": {},
+        "user": "testuser",
+        "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\aasgu\\AppData\\Roaming\\Python\\Python314\\site-packages\\flask\\app.py\", line 917, in full_dispatch_request\n    rv = self.dispatch_request()\n  File \"C:\\Users\\aasgu\\AppData\\Roaming\\Python\\Python314\\site-packages\\flask\\app.py\", line 902, in dispatch_request\n    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^\n  File \"C:\\Users\\aasgu\\AppData\\Roaming\\Python\\Python314\\site-packages\\flask_login\\utils.py\", line 290, in decorated_view\n    return current_app.ensure_sync(func)(*args, **kwargs)\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\aasgu\\AppData\\Roaming\\Python\\Python314\\site-packages\\flask_limiter\\_limits.py\", line 326, in __inner\n    return cast(R, flask.current_app.ensure_sync(obj)(*a, **k))\n                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^\n  File \"D:\\Hobby\\Comic\\routes.py\", line 2215, in create_comment\n    'comment': comment.to_dict()\n               ~~~~~~~~~~~~~~~^^\n  File \"D:\\Hobby\\Comic\\models.py\", line 318, in to_dict\n    'avatar': self.user.avatar\n              ^^^^^^^^^^^^^^^^\nAttributeError: 'User' object has no attribute 'avatar'\n"
+    },
+    {
+        "timestamp": "2026-10-30T18:44:38.856871",
+        "error_type": "AttributeError",
+        "error_message": "'User' object has no attribute 'avatar'",
+        "url": "http://localhost/api/reading-lists",
+        "method": "POST",
+        "query_params": {},
+        "user": "testuser",
+        "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\aasgu\\AppData\\Roaming\\Python\\Python314\\site-packages\\flask\\app.py\", line 917, in full_dispatch_request\n    rv = self.dispatch_request()\n  File \"C:\\Users\\aasgu\\AppData\\Roaming\\Python\\Python314\\site-packages\\flask\\app.py\", line 902, in dispatch_request\n    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^\n  File \"C:\\Users\\aasgu\\AppData\\Roaming\\Python\\Python314\\site-packages\\flask_login\\utils.py\", line 290, in decorated_view\n    return current_app.ensure_sync(func)(*args, **kwargs)\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\aasgu\\AppData\\Roaming\\Python\\Python314\\site-packages\\flask_limiter\\_limits.py\", line 326, in __inner\n    return cast(R, flask.current_app.ensure_sync(obj)(*a, **k))\n                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^\n  File \"D:\\Hobby\\Comic\\routes.py\", line 2346, in create_reading_list\n    'reading_list': reading_list.to_dict()\n                    ~~~~~~~~~~~~~~~~~~~~^^\n  File \"D:\\Hobby\\Comic\\models.py\", line 371, in to_dict\n    'avatar': self.user.avatar\n              ^^^^^^^^^^^^^^^^\nAttributeError: 'User' object has no attribute 'avatar'\n"
+    }
+]

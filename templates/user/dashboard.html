@@ -1,0 +1,377 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - ComicVault{% endblock %}
+
+{% block extra_css %}
+<style>
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+}
+
+.stat-card {
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    border-radius: 1rem;
+    padding: 1.5rem;
+    color: white;
+    transition: transform 0.3s ease;
+}
+
+.stat-card:hover {
+    transform: translateY(-5px);
+}
+
+.stat-card.primary {
+    --gradient-start: #007bff;
+    --gradient-end: #0056b3;
+}
+
+.stat-card.success {
+    --gradient-start: #28a745;
+    --gradient-end: #20c997;
+}
+
+.stat-card.warning {
+    --gradient-start: #ffc107;
+    --gradient-end: #fd7e14;
+}
+
+.stat-card.danger {
+    --gradient-start: #dc3545;
+    --gradient-end: #e83e8c;
+}
+
+.activity-feed {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.activity-item {
+    transition: background-color 0.2s ease;
+}
+
+.activity-item:hover {
+    background-color: #f8f9fa;
+}
+
+.recent-comics {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 1rem;
+}
+
+.recent-comic {
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.recent-comic:hover {
+    transform: translateY(-3px);
+}
+
+.recent-comic img {
+    width: 100%;
+    height: 160px;
+    object-fit: cover;
+    border-radius: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .recent-comics {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    }
+    
+    .recent-comic img {
+        height: 140px;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-5">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1 class="display-5 fw-bold">
+                <i class="fas fa-tachometer-alt me-2 text-primary"></i>Dashboard
+            </h1>
+            <p class="text-muted">Welcome back, {{ user.username }}! Your reading journey continues.</p>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-lg-3 col-md-6 mb-3">
+            <div class="stat-card primary">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-2">Total Comics</h6>
+                        <h3 class="fw-bold mb-0">24</h3>
+                    </div>
+                    <div class="fs-1 opacity-50">
+                        <i class="fas fa-book"></i>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <small><i class="fas fa-arrow-up me-1"></i>+3 this week</small>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-3 col-md-6 mb-3">
+            <div class="stat-card success">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-2">Completed</h6>
+                        <h3 class="fw-bold mb-0">18</h3>
+                    </div>
+                    <div class="fs-1 opacity-50">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <small><i class="fas fa-arrow-up me-1"></i>+2 this week</small>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-3 col-md-6 mb-3">
+            <div class="stat-card warning">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-2">Reading</h6>
+                        <h3 class="fw-bold mb-0">5</h3>
+                    </div>
+                    <div class="fs-1 opacity-50">
+                        <i class="fas fa-book-reader"></i>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <small>1 almost finished</small>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-3 col-md-6 mb-3">
+            <div class="stat-card danger">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-2">Avg Rating</h6>
+                        <h3 class="fw-bold mb-0">4.2</h3>
+                    </div>
+                    <div class="fs-1 opacity-50">
+                        <i class="fas fa-star"></i>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <small>From 42 ratings</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Recent Activity -->
+        <div class="col-lg-8 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="fw-bold mb-0">
+                        <i class="fas fa-history me-2"></i>Recent Activity
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="activity-feed">
+                        <div class="activity-item p-3 border-bottom">
+                            <div class="d-flex">
+                                <div class="me-3">
+                                    <div class="bg-primary bg-opacity-10 rounded-circle p-2">
+                                        <i class="fas fa-book text-primary"></i>
+                                    </div>
+                                </div>
+                                <div class="flex-grow-1">
+                                    <p class="mb-1">Started reading <strong>Watchmen</strong></p>
+                                    <small class="text-muted">2 hours ago</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="activity-item p-3 border-bottom">
+                            <div class="d-flex">
+                                <div class="me-3">
+                                    <div class="bg-success bg-opacity-10 rounded-circle p-2">
+                                        <i class="fas fa-check text-success"></i>
+                                    </div>
+                                </div>
+                                <div class="flex-grow-1">
+                                    <p class="mb-1">Completed <strong>The Dark Knight Returns</strong></p>
+                                    <p class="mb-1"><small>Rated: <i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i></small></p>
+                                    <small class="text-muted">Yesterday</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="activity-item p-3 border-bottom">
+                            <div class="d-flex">
+                                <div class="me-3">
+                                    <div class="bg-warning bg-opacity-10 rounded-circle p-2">
+                                        <i class="fas fa-star text-warning"></i>
+                                    </div>
+                                </div>
+                                <div class="flex-grow-1">
+                                    <p class="mb-1">Rated <strong>V for Vendetta</strong></p>
+                                    <p class="mb-1"><small><i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i> <i class="far fa-star text-warning"></i></small></p>
+                                    <small class="text-muted">2 days ago</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="activity-item p-3 border-bottom">
+                            <div class="d-flex">
+                                <div class="me-3">
+                                    <div class="bg-info bg-opacity-10 rounded-circle p-2">
+                                        <i class="fas fa-upload text-info"></i>
+                                    </div>
+                                </div>
+                                <div class="flex-grow-1">
+                                    <p class="mb-1">Uploaded <strong>Saga Volume 1</strong></p>
+                                    <small class="text-muted">3 days ago</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="activity-item p-3">
+                            <div class="d-flex">
+                                <div class="me-3">
+                                    <div class="bg-success bg-opacity-10 rounded-circle p-2">
+                                        <i class="fas fa-check text-success"></i>
+                                    </div>
+                                </div>
+                                <div class="flex-grow-1">
+                                    <p class="mb-1">Completed <strong>Maus</strong></p>
+                                    <p class="mb-1"><small>Rated: <i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i> <i class="fas fa-star text-warning"></i> <i class="far fa-star text-warning"></i></small></p>
+                                    <small class="text-muted">5 days ago</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Reading Progress & Recent Comics -->
+        <div class="col-lg-4">
+            <!-- Currently Reading -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="fw-bold mb-0">
+                        <i class="fas fa-book-reader me-2"></i>Currently Reading
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex align-items-center mb-3">
+                        <img src="/static/covers/watchmen.jpg" alt="Watchmen" 
+                             class="me-3" style="width: 60px; height: 90px; object-fit: cover; border-radius: 0.25rem;">
+                        <div class="flex-grow-1">
+                            <h6 class="fw-bold mb-1">Watchmen</h6>
+                            <p class="text-muted small mb-2">Alan Moore</p>
+                            <div class="progress" style="height: 8px;">
+                                <div class="progress-bar bg-primary" style="width: 65%"></div>
+                            </div>
+                            <small class="text-muted">65% complete</small>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex align-items-center mb-3">
+                        <img src="/static/covers/sandman.jpg" alt="The Sandman" 
+                             class="me-3" style="width: 60px; height: 90px; object-fit: cover; border-radius: 0.25rem;">
+                        <div class="flex-grow-1">
+                            <h6 class="fw-bold mb-1">The Sandman</h6>
+                            <p class="text-muted small mb-2">Neil Gaiman</p>
+                            <div class="progress" style="height: 8px;">
+                                <div class="progress-bar bg-primary" style="width: 23%"></div>
+                            </div>
+                            <small class="text-muted">23% complete</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Comics -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="fw-bold mb-0">
+                        <i class="fas fa-clock me-2"></i>Recent Comics
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="recent-comics">
+                        <div class="recent-comic" onclick="openComic(1)">
+                            <img src="/static/covers/batman.jpg" alt="Batman" 
+                                 loading="lazy"
+                                 onerror="this.src='/static/images/default-comic.jpg'">
+                            <small class="text-muted d-block">Batman</small>
+                        </div>
+                        
+                        <div class="recent-comic" onclick="openComic(2)">
+                            <img src="/static/covers/superman.jpg" alt="Superman" 
+                                 loading="lazy"
+                                 onerror="this.src='/static/images/default-comic.jpg'">
+                            <small class="text-muted d-block">Superman</small>
+                        </div>
+                        
+                        <div class="recent-comic" onclick="openComic(3)">
+                            <img src="/static/covers/wonder-woman.jpg" alt="Wonder Woman" 
+                                 loading="lazy"
+                                 onerror="this.src='/static/images/default-comic.jpg'">
+                            <small class="text-muted d-block">Wonder Woman</small>
+                        </div>
+                        
+                        <div class="recent-comic" onclick="openComic(4)">
+                            <img src="/static/covers/flash.jpg" alt="The Flash" 
+                                 loading="lazy"
+                                 onerror="this.src='/static/images/default-comic.jpg'">
+                            <small class="text-muted d-block">The Flash</small>
+                        </div>
+                        
+                        <div class="recent-comic" onclick="openComic(5)">
+                            <img src="/static/covers/aquaman.jpg" alt="Aquaman" 
+                                 loading="lazy"
+                                 onerror="this.src='/static/images/default-comic.jpg'">
+                            <small class="text-muted d-block">Aquaman</small>
+                        </div>
+                        
+                        <div class="recent-comic" onclick="openComic(6)">
+                            <img src="/static/covers/martian.jpg" alt="Martian" 
+                                 loading="lazy"
+                                 onerror="this.src='/static/images/default-comic.jpg'">
+                            <small class="text-muted d-block">Martian</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openComic(comicId) {
+    window.location.href = `/comic/${comicId}`;
+}
+
+// Auto-refresh activity feed every 30 seconds
+setInterval(() => {
+    // In a real app, this would fetch new activity from the server
+    console.log('Refreshing activity feed...');
+}, 30000);
+</script>
+{% endblock %}

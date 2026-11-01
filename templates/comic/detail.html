@@ -1,0 +1,562 @@
+{% extends "base.html" %}
+{% from 'components/ad_placeholder.html' import ad_banner, ad_sidebar, ad_in_content %}
+{% from 'components/comments.html' import comments_section %}
+
+{% block title %}{{ comic.title }} - Read Online Free | ComicVault{% endblock %}
+
+{% block meta_description %}{{ comic.description[:160] if comic.description else "Read " + comic.title + " online for free on ComicVault. " + (comic.author or 'Unknown') + "'s amazing comic." }}{% endblock %}
+{% block meta_keywords %}{{ comic.tags|map(attribute='tag')|join(', ') if comic.tags else "comics, " + comic.title + ", " + (comic.author or 'Unknown') + ", read online" }}, manga, graphic novel, free comics{% endblock %}
+
+{% block og_title %}{{ comic.title }} - ComicVault{% endblock %}
+{% block og_description %}{{ comic.description[:200] if comic.description else "Read " + (comic.title or "this comic") + " online for free on ComicVault." }}{% endblock %}
+{% block og_image %}{{ url_for('static', filename='uploads/covers/' + comic.cover_image, _external=True) if comic.cover_image else url_for('static', filename='images/og-image.jpg', _external=True) }}{% endblock %}
+
+{% block twitter_title %}{{ comic.title }} - ComicVault{% endblock %}
+{% block twitter_description %}{{ comic.description[:200] if comic.description else "Read " + (comic.title or "this comic") + " online for free on ComicVault." }}{% endblock %}
+{% block twitter_image %}{{ url_for('static', filename='uploads/covers/' + comic.cover_image, _external=True) if comic.cover_image else url_for('static', filename='images/og-image.jpg', _external=True) }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .comic-hero {
+        background: linear-gradient(to bottom, var(--darker-bg) 0%, transparent 100%);
+        padding: 3rem 0;
+        margin-bottom: 2rem;
+    }
+    
+    .comic-detail-container {
+        display: grid;
+        grid-template-columns: 250px 1fr;
+        gap: 2rem;
+    }
+    
+    .comic-cover-large {
+        position: relative;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        align-self: start;
+        height: fit-content;
+    }
+    
+    .comic-cover-large img {
+        width: 100%;
+        height: auto;
+        display: block;
+        object-fit: contain;
+    }
+    
+    .comic-cover-placeholder {
+        aspect-ratio: 2/3;
+        background: var(--dark-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        font-size: 4rem;
+    }
+    
+    .comic-info h1 {
+        font-size: 2rem;
+        font-weight: 800;
+        margin-bottom: 0.5rem;
+    }
+    
+    .comic-author {
+        color: var(--text-muted);
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+    }
+    
+    .comic-author a {
+        color: var(--primary-color);
+        text-decoration: none;
+    }
+    
+    .comic-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .meta-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--text-muted);
+    }
+    
+    .meta-item i {
+        color: var(--primary-color);
+    }
+    
+    .comic-rating {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .stars {
+        display: flex;
+        gap: 2px;
+    }
+    
+    .star-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1.5rem;
+        color: var(--border-color);
+        transition: all 0.2s;
+        padding: 0;
+    }
+    
+    .star-btn:hover,
+    .star-btn.active,
+    .star-btn:hover i,
+    .star-btn.active i {
+        color: #fbbf24 !important;
+    }
+    
+    .rating-count {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+    }
+    
+    .action-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 2rem;
+    }
+    
+    .btn-read {
+        background: linear-gradient(135deg, var(--primary-color), #8b5cf6);
+        color: white;
+        border: none;
+        padding: 0.75rem 2rem;
+        border-radius: 50px;
+        font-weight: 600;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.3s;
+    }
+    
+    .btn-read:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+        color: white;
+    }
+    
+    .btn-library {
+        padding: 0.75rem 1.5rem;
+        border-radius: 50px;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+    
+    .btn-library:hover {
+        transform: translateY(-2px);
+    }
+    
+    .btn-add-library {
+        background: transparent;
+        border: 2px solid var(--primary-color);
+        color: var(--primary-color);
+    }
+    
+    .btn-in-library {
+        background: var(--primary-color);
+        border: 2px solid var(--primary-color);
+        color: white;
+    }
+    
+    .comic-description {
+        color: var(--text-secondary);
+        line-height: 1.8;
+        margin-bottom: 2rem;
+    }
+    
+    .comic-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 2rem;
+    }
+    
+    .tag {
+        background: var(--dark-bg);
+        color: var(--text-secondary);
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+    }
+    
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    
+    .section-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+    }
+    
+    .similar-comics {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 1rem;
+    }
+    
+    .similar-card {
+        background: var(--card-bg);
+        border-radius: 8px;
+        overflow: hidden;
+        text-decoration: none;
+        color: inherit;
+        transition: all 0.3s;
+    }
+    
+    .similar-card:hover {
+        transform: translateY(-4px);
+    }
+    
+    .similar-card img {
+        width: 100%;
+        aspect-ratio: 2/3;
+        object-fit: cover;
+    }
+    
+    .similar-card-body {
+        padding: 0.75rem;
+    }
+    
+    .similar-card-title {
+        font-size: 0.85rem;
+        font-weight: 600;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    
+    .reading-progress {
+        margin-top: 1rem;
+    }
+    
+    .progress-bar-container {
+        background: var(--dark-bg);
+        border-radius: 10px;
+        padding: 1rem;
+    }
+    
+    .progress-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+    }
+    
+    .progress-bar {
+        height: 8px;
+        background: var(--border-color);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    
+    .progress-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--primary-color), #8b5cf6);
+        border-radius: 4px;
+        transition: width 0.3s;
+    }
+    
+    @media (max-width: 768px) {
+        .comic-detail-container {
+            grid-template-columns: 1fr;
+        }
+        
+        .comic-cover-large {
+            max-width: 200px;
+            margin: 0 auto;
+        }
+        
+        .comic-info h1 {
+            font-size: 1.5rem;
+            text-align: center;
+        }
+        
+        .comic-author,
+        .comic-meta {
+            justify-content: center;
+        }
+        
+        .action-buttons {
+            justify-content: center;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Comic Structured Data for SEO -->
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Book",
+    "name": "{{ comic.title }}",
+    "author": {
+        "@type": "Person",
+        "name": "{{ comic.author }}"
+    },
+    {% if comic.artist %}
+    "illustrator": {
+        "@type": "Person",
+        "name": "{{ comic.artist }}"
+    },
+    {% endif %}
+    "description": "{{ comic.description|replace('"', '\\"') if comic.description else 'Read ' + comic.title + ' online for free' }}",
+    "image": "{{ url_for('static', filename='uploads/covers/' + comic.cover_image, _external=True) if comic.cover_image else url_for('static', filename='images/og-image.jpg', _external=True) }}",
+    "url": "{{ request.url }}",
+    "aggregateRating": {
+        "@type": "AggregateRating",
+        "ratingValue": "{{ comic.average_rating or 0 }}",
+        "reviewCount": "{{ comic.ratings.count() }}"
+    },
+    {% if comic.tags %}
+    "genre": [
+        {% for tag in comic.tags %}
+        "{{ tag.tag }}"{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ],
+    {% endif %}
+    "isAccessibleForFree": true,
+    "accessMode": "visual"
+}
+</script>
+
+<div class="comic-hero">
+    <div class="comic-detail-container">
+        <!-- Cover Image -->
+        <div class="comic-cover-large">
+            {% if comic.cover_url %}
+                <img src="{{ comic.cover_url }}" alt="{{ comic.title }}">
+            {% else %}
+                <div class="comic-cover-placeholder">
+                    <i class="fas fa-book"></i>
+                </div>
+            {% endif %}
+        </div>
+        
+        <!-- Comic Info -->
+        <div class="comic-info">
+            <h1>{{ comic.title }}</h1>
+            <p class="comic-author">
+                by <a href="#">{{ comic.author or 'Unknown' }}</a>
+            </p>
+            
+            <div class="comic-meta">
+                {% if category %}
+                <span class="meta-item">
+                    <i class="fas fa-folder"></i>
+                    <a href="{{ url_for('main.category_view', slug=category.slug) }}" style="color: inherit; text-decoration: none;">
+                        {{ category.name }}
+                    </a>
+                </span>
+                {% elif comic.category %}
+                <span class="meta-item">
+                    <i class="fas fa-folder"></i>
+                    {{ comic.category }}
+                </span>
+                {% endif %}
+                <span class="meta-item">
+                    <i class="fas fa-eye"></i>
+                    {{ comic.view_count }} views
+                </span>
+                <span class="meta-item">
+                    <i class="fas fa-calendar"></i>
+                    {{ comic.created_at.strftime('%b %d, %Y') }}
+                </span>
+            </div>
+            
+            <!-- Rating -->
+            <div class="comic-rating mb-3" role="group" aria-label="Rate this comic">
+                <div class="stars" id="ratingStars">
+                    {% for i in range(1, 6) %}
+                        <button class="star-btn {% if user_rating and i <= user_rating.score %}active{% endif %}" 
+                                data-rating="{{ i }}" onclick="rateComic({{ i }})"
+                                aria-label="Rate {{ i }} star{% if i > 1 %}s{% endif %}"
+                                aria-pressed="{% if user_rating and i <= user_rating.score %}true{% else %}false{% endif %}">
+                            <i class="fas fa-star" aria-hidden="true"></i>
+                        </button>
+                    {% endfor %}
+                </div>
+                <span class="rating-count">
+                    <span id="avgRating" aria-label="Average rating">{{ "%.1f"|format(comic.average_rating or 0) }}</span>
+                    <span id="totalRatings" aria-label="Total ratings">({{ comic.ratings.count() }} ratings)</span>
+                </span>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="action-buttons" role="group" aria-label="Comic actions">
+                {% if comic.pdf_file %}
+                    <a href="{{ url_for('main.read_comic', comic_id=comic.id) }}" class="btn-read" aria-label="{% if user_progress %}Continue reading {{ comic.title }}{% else %}Start reading {{ comic.title }}{% endif %}">
+                        <i class="fas fa-book-reader" aria-hidden="true"></i>
+                        {% if user_progress %}Continue Reading{% else %}Start Reading{% endif %}
+                    </a>
+                {% else %}
+                    <button class="btn-read" disabled aria-label="Coming soon - not available for reading yet">
+                        <i class="fas fa-clock" aria-hidden="true"></i>
+                        Coming Soon
+                    </button>
+                {% endif %}
+                
+                {% if comic.download_link %}
+                    <a href="{{ comic.download_link }}" class="btn btn-outline-light btn-library" target="_blank" aria-label="Download {{ comic.title }}">
+                        <i class="fas fa-download" aria-hidden="true"></i> Download
+                    </a>
+                {% endif %}
+                
+                {% if current_user.is_authenticated %}
+                    <button class="btn-library {% if in_library %}btn-in-library{% else %}btn-add-library{% endif %}" 
+                            onclick="toggleLibrary({{ comic.id }})" data-library-btn
+                            aria-label="{% if in_library %}Remove {{ comic.title }} from library{% else %}Add {{ comic.title }} to library{% endif %}">
+                        {% if in_library %}
+                            <i class="fas fa-check" aria-hidden="true"></i> In Library
+                        {% else %}
+                            <i class="fas fa-plus" aria-hidden="true"></i> Add to Library
+                        {% endif %}
+                    </button>
+                {% endif %}
+            </div>
+            
+            <!-- Reading Progress -->
+            {% if user_progress %}
+            <div class="reading-progress">
+                <div class="progress-bar-container">
+                    <div class="progress-header">
+                        <span><i class="fas fa-bookmark me-1"></i>Reading Progress</span>
+                        <span>{{ user_progress.current_page }} / {{ comic.total_pages or '?' }} pages</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" style="width: {{ (user_progress.current_page / (comic.total_pages or 100) * 100)|round|int }}%"></div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Description -->
+            {% if comic.description %}
+            <div class="comic-description">
+                <h5><i class="fas fa-align-left me-2"></i>Description</h5>
+                <p>{{ comic.description }}</p>
+            </div>
+            {% endif %}
+            
+            <!-- Tags -->
+            {% if comic.tags %}
+            <div class="comic-tags">
+                {% for tag in comic.tags %}
+                    <span class="tag">{{ tag.name }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Sidebar Ad -->
+        <div class="d-none d-lg-block">
+            {{ ad_sidebar() }}
+        </div>
+    </div>
+</div>
+
+<!-- In-Content Ad -->
+{{ ad_in_content() }}
+
+<!-- Related Comics -->
+{% if related %}
+<section class="mt-5">
+    <div class="section-header">
+        <h3 class="section-title">
+            <i class="fas fa-thumbs-up me-2"></i>Related Comics
+        </h3>
+    </div>
+    <div class="similar-comics">
+        {% for item in related %}
+        <a href="{{ url_for('main.comic_detail', comic_id=item.id) }}" class="similar-card">
+            {% if item.cover_url %}
+                <img src="{{ item.cover_url }}" alt="{{ item.title }}">
+            {% else %}
+                <div class="comic-cover-placeholder" style="aspect-ratio: 2/3; font-size: 2rem;">
+                    <i class="fas fa-book"></i>
+                </div>
+            {% endif %}
+            <div class="similar-card-body">
+                <h4 class="similar-card-title">{{ item.title }}</h4>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{# Comments Section #}
+{{ comments_section(comic.id) }}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+window.COMIC_ID = {{ comic.id }};
+window.USER_ID = {{ current_user.id if current_user.is_authenticated else 'null' }};
+
+async function rateComic(rating) {
+    if (!window.USER_ID) {
+        ComicVault.showToast('Please log in to rate comics.', 'warning');
+        return;
+    }
+    try {
+        const response = await fetch('/api/rate_comic', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                comic_id: {{ comic.id }},
+                rating: rating
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            document.querySelectorAll('#ratingStars .star-btn').forEach((btn, index) => {
+                if (index < rating) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            
+            document.getElementById('avgRating').textContent = data.new_average;
+            document.getElementById('totalRatings').textContent = `(${data.total_ratings} ratings)`;
+            
+            ComicVault.showToast(`Rated ${rating} stars!`, 'success');
+        }
+    } catch (error) {
+        console.error('Rating error:', error);
+        ComicVault.showToast('Failed to submit rating', 'error');
+    }
+}
+
+async function toggleLibrary(comicId) {
+    await ComicVault.toggleLibrary(comicId);
+}
+</script>
+{% endblock %}

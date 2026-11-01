@@ -1,0 +1,771 @@
+{% extends "base.html" %}
+
+{% block title %}Add New Comic - ComicVault Admin{% endblock %}
+
+{% block extra_css %}
+<style>
+.ai-suggestion {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 10px;
+}
+.ai-suggestion:hover {
+    transform: translateY(-2px);
+    transition: all 0.2s;
+}
+.preview-section {
+    background-color: #f8f9fa;
+    border-radius: 10px;
+}
+.file-drop-zone {
+    border: 2px dashed #dee2e6;
+    border-radius: 10px;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    background: #f8f9fa;
+}
+.file-drop-zone:hover, .file-drop-zone.dragover {
+    border-color: #0d6efd;
+    background: #e7f1ff;
+}
+.file-drop-zone.has-file {
+    border-color: #198754;
+    background: #d1e7dd;
+}
+.file-drop-zone.uploading {
+    border-color: #ffc107;
+    background: #fff3cd;
+}
+.progress-steps {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 2rem;
+    position: relative;
+}
+.progress-steps::before {
+    content: '';
+    position: absolute;
+    top: 15px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #dee2e6;
+    z-index: 0;
+}
+.step {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+}
+.step-number {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid #dee2e6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 0.5rem;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+.step.active .step-number {
+    border-color: #0d6efd;
+    background: #0d6efd;
+    color: white;
+}
+.step.completed .step-number {
+    border-color: #198754;
+    background: #198754;
+    color: white;
+}
+.step-label {
+    font-size: 0.875rem;
+    color: #6c757d;
+}
+.step.active .step-label {
+    color: #0d6efd;
+    font-weight: 600;
+}
+.step.completed .step-label {
+    color: #198754;
+}
+.cover-preview-img {
+    max-height: 400px;
+    object-fit: contain;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+.seo-score-card {
+    border-left: 4px solid;
+}
+.seo-score-good { border-color: #198754; }
+.seo-score-warning { border-color: #ffc107; }
+.seo-score-bad { border-color: #dc3545; }
+.metadata-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 10px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row">
+        <!-- Main Form -->
+        <div class="col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-plus-circle me-2"></i>Add New Comic</h5>
+                <a href="{{ url_for('main.admin_dashboard') }}" class="btn btn-light btn-sm">
+                        <i class="fas fa-arrow-left me-1"></i>Back to Dashboard
+                    </a>
+                </div>
+                <div class="card-body">
+                    <!-- Progress Steps -->
+                    <div class="progress-steps" id="uploadProgress">
+                        <div class="step active" id="step1">
+                            <div class="step-number">1</div>
+                            <div class="step-label">Upload PDF</div>
+                        </div>
+                        <div class="step" id="step2">
+                            <div class="step-number">2</div>
+                            <div class="step-label">Processing</div>
+                        </div>
+                        <div class="step" id="step3">
+                            <div class="step-number">3</div>
+                            <div class="step-label">Review</div>
+                        </div>
+                    </div>
+
+                    <!-- Upload Area (Step 1) -->
+                    <div id="uploadArea">
+                        <div class="text-center mb-4">
+                            <h6 class="text-muted text-uppercase small fw-bold">Comic PDF Upload</h6>
+                            <p class="text-muted small">Select a PDF file. It will be processed automatically.</p>
+                        </div>
+                        
+                        <!-- SINGLE UNIFIED UPLOAD DROP ZONE -->
+                        <div class="file-drop-zone p-5 text-center mb-4" id="unifiedDropZone">
+                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                            <h5>Drop PDF here or click to browse</h5>
+                            <p class="text-muted mb-0">Max file size: 50MB</p>
+                            <input type="file" id="unifiedFileInput" accept=".pdf" style="display: none;">
+                        </div>
+                        
+                        <!-- File Info Display -->
+                        <div id="fileInfo" class="d-none mb-4">
+                            <div class="d-flex align-items-center p-3 bg-light rounded">
+                                <i class="fas fa-file-pdf text-danger fa-2x me-3"></i>
+                                <div class="flex-grow-1">
+                                    <div class="fw-bold" id="fileName"></div>
+                                    <div class="text-muted small" id="fileSize"></div>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-danger" id="removeFile">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Upload Button -->
+                        <div class="d-grid gap-2 mb-4">
+                            <button type="button" class="btn btn-primary btn-lg" id="processBtn" disabled>
+                                <i class="fas fa-magic me-2"></i>Upload & Process with AI
+                            </button>
+                        </div>
+                        
+                        <!-- Processing Status -->
+                        <div id="processingStatus" class="d-none">
+                            <div class="card">
+                                <div class="card-body">
+                                    <h6 class="card-title">Processing...</h6>
+                                    <div class="progress mb-3">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                             id="processProgress" style="width: 0%"></div>
+                                    </div>
+                                    <div id="processSteps">
+                                        <div class="d-flex align-items-center mb-2" id="step-save">
+                                            <i class="fas fa-circle text-muted me-2"></i>
+                                            <span>Saving to storage...</span>
+                                        </div>
+                                        <div class="d-flex align-items-center mb-2" id="step-cover">
+                                            <i class="fas fa-circle text-muted me-2"></i>
+                                            <span>Extracting cover...</span>
+                                        </div>
+                                        <div class="d-flex align-items-center mb-2" id="step-llm">
+                                            <i class="fas fa-circle text-muted me-2"></i>
+                                            <span>Analyzing with Vision LLM...</span>
+                                        </div>
+                                        <div class="d-flex align-items-center" id="step-upfiles">
+                                            <i class="fas fa-circle text-muted me-2"></i>
+                                            <span>Uploading to upfiles.com...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Review Form (Step 3) -->
+    <form method="POST" action="{{ url_for('main.admin_comic_create') }}" id="comicForm" class="d-none" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <!-- Hidden fields for processed data -->
+                        <input type="hidden" name="comic_id" id="hiddenComicId">
+                        <input type="hidden" name="local_path" id="hiddenLocalPath">
+                        <input type="hidden" name="cover_path" id="hiddenCoverPath">
+                        
+                        <div class="row">
+                            <!-- Basic Info -->
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label for="title" class="form-label">Title <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="title" name="title" required>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label for="author" class="form-label">Author <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="author" name="author" required>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label for="artist" class="form-label">Artist</label>
+                                        <input type="text" class="form-control" id="artist" name="artist">
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="episode" class="form-label">Episode / Chapter</label>
+                                    <input type="text" class="form-control" id="episode" name="episode" placeholder="e.g. Episode 1, Chapter 5">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="description" class="form-label">Description</label>
+                                    <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-4 mb-3">
+                                        <label for="category" class="form-label">Category</label>
+                                        <select class="form-select" id="category" name="category_id">
+                                            <option value="">Select Category</option>
+                                            {% for category in categories %}
+                                            <option value="{{ category.id }}">{{ category.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label for="language" class="form-label">Language</label>
+                                        <input type="text" class="form-control" id="language" name="language" placeholder="e.g., English, Japanese">
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label for="tags" class="form-label">Tags (comma-separated)</label>
+                                        <input type="text" class="form-control" id="tags" name="tags" placeholder="action, adventure, fantasy">
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="download_link" class="form-label">
+                                        <i class="fas fa-cloud-download-alt me-1"></i>Download Link 
+                                        <span class="text-muted">(Click 'Fetch' to upload to UpFiles)</span>
+                                    </label>
+                                    <div class="input-group">
+                                        <input type="url" class="form-control" id="download_link" name="download_link" readonly>
+                                        <button class="btn btn-outline-primary" type="button" id="uploadToHostBtn" title="Upload locally saved file to UpFiles">
+                                            <i class="fas fa-cloud-upload-alt me-1"></i>Fetch URL
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Cover Preview -->
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Cover Preview</label>
+                                    <div class="text-center">
+                                        <img id="coverPreview" class="cover-preview-img img-fluid mb-2" 
+                                             src="" alt="Cover Preview" style="display: none;">
+                                        <div id="noCoverMessage" class="text-muted py-5">
+                                            <i class="fas fa-image fa-3x mb-2"></i>
+                                            <p>No cover extracted</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Submit Buttons -->
+                        <div class="d-flex gap-3 mt-4">
+                            <button type="submit" class="btn btn-primary btn-lg flex-fill">
+                                <i class="fas fa-save me-2"></i>Create Comic
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-lg" id="resetBtn">
+                                <i class="fas fa-redo me-2"></i>Start Over
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- AI Metadata Card -->
+            <div class="card shadow-sm mb-4" id="aiMetadataCard" style="display: none;">
+                <div class="card-header bg-info text-white">
+                    <h6 class="mb-0"><i class="fas fa-robot me-2"></i>AI Extracted Data</h6>
+                </div>
+                <div class="card-body">
+                    <div id="aiMetadataContent">
+                        <p class="text-muted">No data extracted yet.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Help Card -->
+            <div class="card shadow-sm">
+                <div class="card-header bg-light">
+                    <h6 class="mb-0"><i class="fas fa-info-circle me-2"></i>How It Works</h6>
+                </div>
+                <div class="card-body">
+                    <ol class="small text-muted mb-0">
+                        <li class="mb-2">Upload your PDF comic file</li>
+                        <li class="mb-2">The system automatically:
+                            <ul class="mt-1">
+                                <li>Saves the file locally</li>
+                                <li>Extracts the first page as cover</li>
+                                <li>Analyzes with AI Vision</li>
+                                <li>Uploads to upfiles.com</li>
+                            </ul>
+                        </li>
+                        <li class="mb-2">Review and edit the extracted data</li>
+                        <li>Create the comic in your library</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ============================================
+// SINGLE UNIFIED UPLOADER
+// ============================================
+
+let selectedFile = null;
+let uploadResult = null;
+
+// DOM Elements
+const unifiedDropZone = document.getElementById('unifiedDropZone');
+const unifiedFileInput = document.getElementById('unifiedFileInput');
+const fileInfo = document.getElementById('fileInfo');
+const fileName = document.getElementById('fileName');
+const fileSize = document.getElementById('fileSize');
+const removeFileBtn = document.getElementById('removeFile');
+const processBtn = document.getElementById('processBtn');
+const processingStatus = document.getElementById('processingStatus');
+const comicForm = document.getElementById('comicForm');
+const uploadArea = document.getElementById('uploadArea');
+const resetBtn = document.getElementById('resetBtn');
+
+// Step indicators
+const step1 = document.getElementById('step1');
+const step2 = document.getElementById('step2');
+const step3 = document.getElementById('step3');
+
+// ============================================
+// FILE SELECTION HANDLERS
+// ============================================
+
+// Click on drop zone
+unifiedDropZone.addEventListener('click', () => unifiedFileInput.click());
+
+// File input change
+unifiedFileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        handleFileSelect(e.target.files[0]);
+    }
+});
+
+// Drag and drop
+unifiedDropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    unifiedDropZone.classList.add('dragover');
+});
+
+unifiedDropZone.addEventListener('dragleave', () => {
+    unifiedDropZone.classList.remove('dragover');
+});
+
+unifiedDropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    unifiedDropZone.classList.remove('dragover');
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0 && files[0].type === 'application/pdf') {
+        handleFileSelect(files[0]);
+    } else {
+        showNotification('Please select a PDF file.', 'error');
+    }
+});
+
+// Remove file
+removeFileBtn.addEventListener('click', () => {
+    resetUpload();
+});
+
+// Reset button
+resetBtn.addEventListener('click', () => {
+    resetUpload();
+});
+
+function handleFileSelect(file) {
+    if (!file || file.type !== 'application/pdf') {
+        showNotification('Please select a valid PDF file.', 'error');
+        return;
+    }
+    
+    selectedFile = file;
+    
+    // Update UI
+    fileName.textContent = file.name;
+    fileSize.textContent = formatFileSize(file.size);
+    fileInfo.classList.remove('d-none');
+    unifiedDropZone.classList.add('has-file');
+    unifiedDropZone.classList.add('d-none');
+    processBtn.disabled = false;
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function resetUpload() {
+    selectedFile = null;
+    uploadResult = null;
+    
+    // Reset UI
+    unifiedFileInput.value = '';
+    fileInfo.classList.add('d-none');
+    unifiedDropZone.classList.remove('has-file', 'd-none');
+    processBtn.disabled = true;
+    processingStatus.classList.add('d-none');
+    comicForm.classList.add('d-none');
+    uploadArea.classList.remove('d-none');
+    
+    // Reset steps
+    step1.classList.add('active');
+    step1.classList.remove('completed');
+    step2.classList.remove('active', 'completed');
+    step3.classList.remove('active', 'completed');
+    
+    // Reset form
+    document.getElementById('comicForm').reset();
+    document.getElementById('coverPreview').style.display = 'none';
+    document.getElementById('noCoverMessage').style.display = 'block';
+    document.getElementById('aiMetadataCard').style.display = 'none';
+    
+    // Reset progress steps
+    resetProcessSteps();
+}
+
+function resetProcessSteps() {
+    const steps = ['step-save', 'step-cover', 'step-llm', 'step-upfiles'];
+    steps.forEach(id => {
+        const el = document.getElementById(id);
+        el.querySelector('i').className = 'fas fa-circle text-muted me-2';
+    });
+    document.getElementById('processProgress').style.width = '0%';
+}
+
+// ============================================
+// MAIN PROCESS BUTTON - SINGLE UPLOAD DOES ALL
+// ============================================
+
+processBtn.addEventListener('click', async () => {
+    if (!selectedFile) {
+        showNotification('Please select a file first.', 'error');
+        return;
+    }
+    
+    // Disable button and show processing
+    processBtn.disabled = true;
+    processBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing...';
+    processingStatus.classList.remove('d-none');
+    
+    // Update steps UI
+    step1.classList.remove('active');
+    step1.classList.add('completed');
+    step2.classList.add('active');
+    
+    try {
+        // SINGLE API CALL DOES EVERYTHING
+        const result = await unifiedUpload(selectedFile);
+        
+        if (result.success) {
+            uploadResult = result.data;
+            
+            // Populate form with results
+            populateForm(uploadResult);
+            
+            // Show form
+            uploadArea.classList.add('d-none');
+            comicForm.classList.remove('d-none');
+            
+            // Update steps
+            step2.classList.remove('active');
+            step2.classList.add('completed');
+            step3.classList.add('active');
+            
+            showNotification('Upload and processing complete! Please review the data.', 'success');
+        } else {
+            throw new Error(result.errors?.join(', ') || 'Upload failed');
+        }
+        
+    } catch (error) {
+        console.error('Upload error:', error);
+        showNotification('Error: ' + error.message, 'error');
+        processBtn.disabled = false;
+        processBtn.innerHTML = '<i class="fas fa-magic me-2"></i>Upload & Process with AI';
+    }
+});
+
+// ============================================
+// UNIFIED UPLOAD API - SINGLE CALL DOES ALL
+// ============================================
+
+async function unifiedUpload(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('extract_metadata', 'true');
+    formData.append('upload_to_upfiles', 'false'); // Skip upload for now as requested
+    
+    // Update progress: Save to storage
+    updateProcessStep('step-save', 'loading');
+    document.getElementById('processProgress').style.width = '25%';
+    
+    try {
+        const response = await fetch('/admin/unified_upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        // Update progress: Cover extraction
+        updateProcessStep('step-save', 'complete');
+        updateProcessStep('step-cover', 'complete');
+        document.getElementById('processProgress').style.width = '50%';
+        
+        // Update progress: LLM Analysis
+        updateProcessStep('step-llm', 'complete');
+        document.getElementById('processProgress').style.width = '75%';
+        
+        const data = await response.json();
+        
+        // Skip upfiles step visually in processing status since we decoupled it
+        updateProcessStep('step-upfiles', 'warning'); // Shows it was skipped/pending
+        document.getElementById('processProgress').style.width = '100%';
+        
+        return data;
+        
+    } catch (error) {
+        updateProcessStep('step-upfiles', 'error');
+        throw error;
+    }
+}
+
+function updateProcessStep(stepId, status) {
+    const el = document.getElementById(stepId);
+    const icon = el.querySelector('i');
+    
+    switch(status) {
+        case 'loading':
+            icon.className = 'fas fa-spinner fa-spin text-primary me-2';
+            break;
+        case 'complete':
+            icon.className = 'fas fa-check-circle text-success me-2';
+            break;
+        case 'warning':
+            icon.className = 'fas fa-exclamation-circle text-warning me-2';
+            break;
+        case 'error':
+            icon.className = 'fas fa-times-circle text-danger me-2';
+            break;
+        default:
+            icon.className = 'fas fa-circle text-muted me-2';
+    }
+}
+
+// ============================================
+// FORM POPULATION
+// ============================================
+
+function populateForm(data) {
+    if (!data) return;
+    
+    // Set hidden fields
+    if (data.comic_id) document.getElementById('hiddenComicId').value = data.comic_id;
+    if (data.local_path) document.getElementById('hiddenLocalPath').value = data.local_path;
+    if (data.cover_path) document.getElementById('hiddenCoverPath').value = data.cover_path;
+    
+    // Set cover preview
+    if (data.cover_url) {
+        const coverPreview = document.getElementById('coverPreview');
+        if (coverPreview) {
+            coverPreview.src = data.cover_url;
+            coverPreview.style.display = 'block';
+            const noCoverMsg = document.getElementById('noCoverMessage');
+            if (noCoverMsg) noCoverMsg.style.display = 'none';
+        }
+    }
+    
+    // Set download link (from upfiles if it happened, otherwise leave empty)
+    const downloadLink = document.getElementById('download_link');
+    const uploadBtn = document.getElementById('uploadToHostBtn');
+    
+    if (downloadLink && uploadBtn) {
+        if (data.upfiles_url) {
+            downloadLink.value = data.upfiles_url;
+            uploadBtn.disabled = true;
+        } else {
+            downloadLink.value = '';
+            uploadBtn.disabled = false;
+        }
+    }
+    
+    // Set metadata from LLM
+    if (data.metadata) {
+        const meta = data.metadata;
+        
+        if (meta.title) document.getElementById('title').value = meta.title;
+        if (meta.episode) document.getElementById('episode').value = meta.episode;
+        if (meta.author) document.getElementById('author').value = meta.author;
+        if (meta.artist) document.getElementById('artist').value = meta.artist;
+        if (meta.description) document.getElementById('description').value = meta.description;
+        if (meta.language) document.getElementById('language').value = meta.language;
+        if (meta.tags) {
+            const tagsInput = document.getElementById('tags');
+            if (tagsInput) {
+                tagsInput.value = Array.isArray(meta.tags) ? meta.tags.join(', ') : meta.tags;
+            }
+        }
+        
+        // Try to match category
+        if (meta.category) {
+            const categorySelect = document.getElementById('category');
+            if (categorySelect) {
+                for (let i = 0; i < categorySelect.options.length; i++) {
+                    if (categorySelect.options[i].text.toLowerCase() === meta.category.toLowerCase()) {
+                        categorySelect.selectedIndex = i;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Show AI metadata card
+        showAIMetadata(meta);
+    }
+}
+
+function showAIMetadata(meta) {
+    const card = document.getElementById('aiMetadataCard');
+    const content = document.getElementById('aiMetadataContent');
+    
+    let html = '<dl class="row mb-0">';
+    if (meta.title) html += `<dt class="col-sm-4">Title</dt><dd class="col-sm-8">${escapeHtml(meta.title)}</dd>`;
+    if (meta.author) html += `<dt class="col-sm-4">Author</dt><dd class="col-sm-8">${escapeHtml(meta.author)}</dd>`;
+    if (meta.artist) html += `<dt class="col-sm-4">Artist</dt><dd class="col-sm-8">${escapeHtml(meta.artist)}</dd>`;
+    if (meta.category) html += `<dt class="col-sm-4">Category</dt><dd class="col-sm-8">${escapeHtml(meta.category)}</dd>`;
+    if (meta.language) html += `<dt class="col-sm-4">Language</dt><dd class="col-sm-8">${escapeHtml(meta.language)}</dd>`;
+    if (meta.tags) html += `<dt class="col-sm-4">Tags</dt><dd class="col-sm-8">${escapeHtml(Array.isArray(meta.tags) ? meta.tags.join(', ') : meta.tags)}</dd>`;
+    html += '</dl>';
+    
+    content.innerHTML = html;
+    card.style.display = 'block';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+function showNotification(message, type = 'info') {
+    // Use the global notification system if available
+    if (typeof showSuccess === 'function' && type === 'success') {
+        showSuccess(message);
+    } else if (typeof showError === 'function' && type === 'error') {
+        showError(message);
+    } else if (typeof showInfo === 'function') {
+        showInfo(message);
+    } else {
+        // Fallback to alert
+        alert(message);
+    }
+}
+
+// ============================================
+// FORM SUBMISSION
+// ============================================
+
+comicForm.addEventListener('submit', function(e) {
+    const title = document.getElementById('title').value.trim();
+    const author = document.getElementById('author').value.trim();
+    
+    if (!title || !author) {
+        e.preventDefault();
+        showNotification('Please fill in at least the title and author fields.', 'error');
+        return false;
+    }
+});
+// ============================================
+// MANUAL UPLOAD TO HOST
+// ============================================
+
+const uploadToHostBtn = document.getElementById('uploadToHostBtn');
+uploadToHostBtn.addEventListener('click', async () => {
+    const localPath = document.getElementById('hiddenLocalPath').value;
+    if (!localPath) {
+        showNotification('No local file path found. Please re-upload PDF.', 'error');
+        return;
+    }
+    
+    uploadToHostBtn.disabled = true;
+    uploadToHostBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading...';
+    
+    try {
+        const response = await fetch('/admin/upload_to_host', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ local_path: localPath })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            document.getElementById('download_link').value = result.upfiles_url;
+            uploadToHostBtn.innerHTML = '<i class="fas fa-check me-2"></i>Done';
+            showNotification('File successfully uploaded to UpFiles!', 'success');
+        } else {
+            throw new Error(result.message || 'Upload failed');
+        }
+    } catch (error) {
+        console.error('Manual upload error:', error);
+        showNotification('Error: ' + error.message, 'error');
+        uploadToHostBtn.disabled = false;
+        uploadToHostBtn.innerHTML = '<i class="fas fa-cloud-upload-alt me-1"></i>Fetch URL';
+    }
+});
+</script>
+{% endblock %}

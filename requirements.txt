@@ -1,0 +1,16 @@
+Flask
+Flask-SQLAlchemy
+Flask-Login
+Werkzeug
+Pillow
+PyPDF2
+python-dotenv
+requests
+Flask-WTF
+Flask-Limiter
+Flask-Talisman
+bleach
+flask_migrate
+pymupdf
+cryptography
+
