@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ reading_list.name }} - ComicVault{% endblock %}
+{% block title %}{{ reading_list.title }} - ComicVault{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -200,7 +200,7 @@
     <div class="list-detail-header">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
             <div>
-                <h1>{{ reading_list.name }}</h1>
+                <h1>{{ reading_list.title }}</h1>
                 <div class="meta">
                     <span><i class="fas fa-book"></i> {{ comics|length }} {{ 'comic' if comics|length == 1 else 'comics' }}</span>
                     {% if reading_list.is_public %}
@@ -235,11 +235,11 @@
                     <i class="fas fa-times"></i>
                 </button>
                 <div class="cover-wrapper">
-                    <img src="{{ url_for('static', filename='covers/' + comic.cover_image) if comic.cover_image else url_for('static', filename='images/placeholder.png') }}" 
+                    <img src="{{ comic.cover_url }}"
                          alt="{{ comic.title }}" 
                          class="cover"
                          loading="lazy"
-                         onerror="this.src='{{ url_for('static', filename='images/placeholder.png') }}'">
+                         onerror="this.src='{{ url_for('static', filename='images/default-cover.svg') }}'">
                     <div class="overlay">
                         <a href="{{ url_for('main.comic_detail', comic_id=comic.id) }}" class="btn-read" style="color: white;">
                             <i class="fas fa-book-reader"></i> Read Now
@@ -273,7 +273,7 @@
         <form id="editForm" onsubmit="return saveList(event)">
             <div class="form-group" style="margin-bottom: 1.5rem;">
                 <label style="display: block; margin-bottom: 0.5rem; color: var(--text-color); font-weight: 500;">List Name</label>
-                <input type="text" id="list-name" value="{{ reading_list.name }}" required maxlength="100"
+                <input type="text" id="list-name" value="{{ reading_list.title }}" required maxlength="100"
                        style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 0.5rem; background: var(--input-bg); color: var(--text-color); font-size: 1rem;">
             </div>
             <div class="form-group" style="margin-bottom: 1.5rem;">

@@ -112,6 +112,15 @@
 {% endblock %}
 
 {% block content %}
+<div class="container mt-4">
+    <label for="uploadVisibility" class="form-label">Visibility</label>
+    <select id="uploadVisibility" class="form-select" style="max-width: 320px;">
+        <option value="public">Public</option>
+        <option value="private">Private</option>
+        <option value="draft">Draft</option>
+    </select>
+    <p class="small text-muted">Choose visibility before uploading. Private comics and drafts use local storage.</p>
+</div>
 <div class="container-fluid py-4">
     <div class="row">
         <!-- Main Form -->
@@ -211,6 +220,7 @@
                     <!-- Review Form (Step 3) -->
     <form method="POST" action="{{ url_for('main.admin_comic_create') }}" id="comicForm" class="d-none" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    <input type="hidden" name="visibility" id="postVisibility" value="public">
                         <!-- Hidden fields for processed data -->
                         <input type="hidden" name="comic_id" id="hiddenComicId">
                         <input type="hidden" name="local_path" id="hiddenLocalPath">
@@ -257,7 +267,7 @@
                                     </div>
                                     <div class="col-md-4 mb-3">
                                         <label for="language" class="form-label">Language</label>
-                                        <input type="text" class="form-control" id="language" name="language" placeholder="e.g., English, Japanese">
+                                        <input type="text" class="form-control" id="language" name="language" value="English" placeholder="e.g., English, Japanese">
                                     </div>
                                     <div class="col-md-4 mb-3">
                                         <label for="tags" class="form-label">Tags (comma-separated)</label>
@@ -350,6 +360,11 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+document.getElementById('uploadVisibility').addEventListener('change', function () {
+    document.getElementById('postVisibility').value = this.value;
+});
+</script>
 <script>
 // ============================================
 // SINGLE UNIFIED UPLOADER
@@ -544,6 +559,9 @@ processBtn.addEventListener('click', async () => {
 async function unifiedUpload(file) {
     const formData = new FormData();
     formData.append('file', file);
+    const visibility = document.getElementById('uploadVisibility').value;
+    document.getElementById('postVisibility').value = visibility;
+    formData.append('visibility', visibility);
     formData.append('extract_metadata', 'true');
     formData.append('upload_to_upfiles', 'false'); // Skip upload for now as requested
     
@@ -692,9 +710,9 @@ function showAIMetadata(meta) {
 }
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return String(text ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[character]);
 }
 
 // ============================================
@@ -748,7 +766,8 @@ uploadToHostBtn.addEventListener('click', async () => {
         const response = await fetch('/admin/upload_to_host', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ local_path: localPath })
+            body: JSON.stringify({ local_path: localPath,
+                visibility: document.getElementById('uploadVisibility').value })
         });
         
         const result = await response.json();

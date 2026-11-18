@@ -3,16 +3,21 @@ ComicVault - Flask Application Routes
 Main application routes and API endpoints
 """
 
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, send_from_directory, current_app
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, send_from_directory, current_app, abort, session
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.utils import secure_filename
-from models import db, User, Comic, Category, Tag, ComicTag, ReadingProgress, Rating, UserLibrary, Setting, Ad, Chapter, Comment, CommentLike, ReadingList, ReadingListItem, Activity, Follow, ComicPage
+from models import utc_isoformat, db, User, Comic, Category, Tag, ComicTag, ReadingProgress, Rating, UserLibrary, Setting, Ad, Chapter, Comment, CommentLike, ReadingList, ReadingListItem, Activity, Follow, ComicPage, Bookmark
 from datetime import datetime
 import os
 import uuid
 import shutil
 import bleach
+import hashlib
+from urllib.parse import urlsplit
+from network_utils import safe_request, download_remote_file
+from upload_utils import read_limited, validate_upload, normalized_cover
 from extensions import limiter
+from security_utils import is_safe_path, is_safe_redirect_target, sanitize_plain_text
 
 # Import unified uploader & cloud storage service
 from unified_uploader import UnifiedUploader, create_uploader_from_config
@@ -29,6 +34,225 @@ def format_storage_ref(val):
 
 # Create Blueprint
 main = Blueprint('main', __name__)
+
+
+def wants_json_response():
+    return request.path.startswith('/api/') or request.is_json or request.endpoint in {
+        'main.admin_test_catbox', 'main.admin_migrate_to_cloud', 'main.admin_test_llm',
+        'main.admin_test_upfiles', 'main.admin_unified_upload', 'main.admin_upload_to_host',
+        'main.admin_bulk_upload_file'
+    }
+
+
+def public_comic_filter():
+    return db.and_(Comic.visibility == 'public', Comic.is_published.is_(True))
+
+
+def visible_comic_filter():
+    if current_user.is_authenticated:
+        if current_user.is_admin:
+            return db.true()
+        return db.or_(public_comic_filter(), Comic.uploader_id == current_user.id)
+    return public_comic_filter()
+
+
+def validated_link(value):
+    if not value:
+        return None
+    if not isinstance(value, str) or len(value) > 1000 or '\\' in value or any(ord(char) < 33 or ord(char) == 127 for char in value):
+        abort(400, description='A valid HTTP(S) link is required')
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username is not None or parsed.password is not None:
+            raise ValueError()
+        parsed.port
+    except ValueError:
+        abort(400, description='A valid HTTP(S) link is required')
+    return value
+
+
+def storage_reference(value):
+    reference = format_storage_ref(value)
+    if reference and reference.startswith(('http://', 'https://')):
+        return validated_link(reference)
+    if reference and (not secure_filename(reference) or ':' in reference or '\x00' in reference):
+        abort(400, description='Invalid storage reference')
+    return reference
+
+
+def validate_visibility(value, pdf_file=None, cover_image=None, download_link=None):
+    if value not in ('public', 'private', 'draft'):
+        abort(400, description='Invalid visibility')
+    if value != 'public' and any(reference and reference.startswith(('http://', 'https://')) for reference in (pdf_file, cover_image, download_link)):
+        abort(400, description='Private comics and drafts require local assets. Public cloud URLs cannot be made private.')
+    return value
+
+
+def clean_tags(value):
+    if not isinstance(value, str) or len(value) > 2000:
+        abort(400, description='Invalid tags')
+    tags = list(dict.fromkeys(require_text(tag.strip(), 'tag', 50) for tag in value.split(',') if tag.strip()))
+    if len(tags) > 20:
+        abort(400, description='At most 20 tags are allowed')
+    return tags
+
+
+def save_cover_upload(file, cloud_enabled=False, userhash=''):
+    try:
+        data = normalized_cover(read_limited(file), file.filename)
+    except ValueError as error:
+        abort(400, description=str(error))
+    name = f'cover_{uuid.uuid4().hex}.jpg'
+    if cloud_enabled:
+        url = CatboxService(userhash=userhash).upload_file(data, filename=name)
+        if not url:
+            abort(502, description='The cover could not be uploaded to cloud storage')
+        return url
+    folder = current_app.config['COVER_UPLOAD_FOLDER']
+    os.makedirs(folder, exist_ok=True)
+    from security_utils import safe_join_path
+    path = safe_join_path(folder, name)
+    if not path:
+        abort(400, description='Invalid cover path')
+    with open(path, 'xb') as target:
+        target.write(data)
+    return name
+
+
+def get_accessible_comic(comic_id):
+    comic = db.session.get(Comic, comic_id)
+    if not comic or not comic.can_view(current_user):
+        abort(404)
+    return comic
+
+
+def require_integer(value, name, minimum=1, maximum=2147483647, optional=False):
+    if value is None and optional:
+        return None
+    if isinstance(value, str) and value.isascii() and value.isdecimal() and len(value) <= 10:
+        value = int(value)
+    if type(value) is not int or not minimum <= value <= maximum:
+        abort(400, description=f'{name} must be an integer between {minimum} and {maximum}')
+    return value
+
+
+def require_boolean(value, name):
+    if type(value) is not bool:
+        abort(400, description=f'{name} must be a boolean')
+    return value
+
+
+def require_text(value, name, max_length, allow_empty=False):
+    if not isinstance(value, str) or len(value) > max_length:
+        abort(400, description=f'{name} must be text of at most {max_length} characters')
+    text = sanitize_plain_text(value, max_length=max_length)
+    if not text and not allow_empty:
+        abort(400, description=f'{name} is required')
+    return text
+
+
+def validate_chapter(comic_id, chapter_id):
+    chapter_id = require_integer(chapter_id, 'chapter_id', optional=True)
+    if chapter_id is not None:
+        chapter = db.session.get(Chapter, chapter_id)
+        if not chapter or chapter.comic_id != comic_id:
+            abort(400, description='The chapter must belong to this comic')
+    return chapter_id
+
+
+def persist_reading_progress(data, page_field):
+    """Use one validation and calculation path for both reader APIs."""
+    comic_id = require_integer(data.get('comic_id'), 'comic_id')
+    get_accessible_comic(comic_id)
+    chapter_id = validate_chapter(comic_id, data.get('chapter_id'))
+    limit = current_app.config['MAX_COMIC_PAGES']
+    page = require_integer(data.get(page_field), page_field, maximum=limit)
+    total = require_integer(data.get('total_pages'), 'total_pages', minimum=0, maximum=limit, optional=True)
+    time_spent = require_integer(data.get('time_spent', 0), 'time_spent', minimum=0, maximum=86400)
+    progress = ReadingProgress.query.filter_by(user_id=current_user.id, comic_id=comic_id, chapter_id=chapter_id).first()
+    total = total if total is not None else (progress.total_pages if progress else 0)
+    if total and page > total:
+        abort(400, description='The current page cannot exceed the total page count')
+    if not progress:
+        progress = ReadingProgress(user_id=current_user.id, comic_id=comic_id, chapter_id=chapter_id, total_time_spent=0)
+        db.session.add(progress)
+    progress.update_progress(page, total, time_spent)
+    db.session.commit()
+    return jsonify(success=True, message='Progress saved')
+
+
+def serialize_reading_list(reading_list, include_items=False):
+    items = [item for item in reading_list.items if item.comic and item.comic.can_view(current_user)]
+    data = reading_list.to_dict()
+    data['items_count'] = len(items)
+    if include_items:
+        data['items'] = [item.to_dict() for item in items]
+    return data
+
+
+def get_accessible_comment(comment_id, owner_access=False):
+    comment = Comment.query.get_or_404(comment_id)
+    get_accessible_comic(comment.comic_id)
+    if comment.is_hidden and not (current_user.is_authenticated and (current_user.is_admin or (owner_access and comment.user_id == current_user.id))):
+        abort(404)
+    return comment
+
+
+def account_recovery_limit_key():
+    email = (request.form.get('email') or '').strip().lower()[:120]
+    return hashlib.sha256(email.encode('utf-8')).hexdigest()
+
+
+@main.before_app_request
+def validate_request_access():
+    if request.is_json and request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        if request.get_data(cache=True) and not isinstance(request.get_json(silent=True), dict):
+            abort(400, description='A JSON object is required')
+    if request.path == '/admin' or request.path.startswith('/admin/'):
+        if not current_user.is_authenticated:
+            return current_app.login_manager.unauthorized()
+        if not current_user.is_admin:
+            abort(403)
+    if request.endpoint != 'static':
+        return None
+    filename = (request.view_args or {}).get('filename', '')
+    if not is_safe_path(current_app.static_folder, os.path.join(current_app.static_folder, filename)):
+        abort(404)
+    if not filename.startswith('uploads/'):
+        return None
+    parts = filename.split('/')
+    extension = os.path.splitext(filename)[1].lower()
+    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+    if len(parts) < 3 or extension not in image_extensions | {'.pdf'}:
+        abort(404)
+    if parts[1] in ('covers', 'pages') and extension not in image_extensions:
+        abort(404)
+    if parts[1] == 'comics' and extension != '.pdf':
+        abort(404)
+    if current_user.is_authenticated and current_user.is_admin:
+        return None  # Administrators also preview newly staged uploads.
+    comics = []
+    if len(parts) == 4 and parts[1] == 'pages':
+        comic_id = require_integer(parts[2], 'comic_id')
+        get_accessible_comic(comic_id)
+        return None
+    if len(parts) == 3 and parts[1] in ('comics', 'covers'):
+        column = Comic.pdf_file if parts[1] == 'comics' else Comic.cover_image
+        comics = Comic.query.filter(column == parts[2]).all()
+        if parts[1] == 'comics':
+            comics.extend(chapter.comic for chapter in Chapter.query.filter_by(pdf_file=parts[2]).all())
+    if not any(comic.can_view(current_user) for comic in comics):
+        abort(404)
+
+
+@main.after_app_request
+def prevent_private_response_caching(response):
+    if request.endpoint == 'static' and (request.view_args or {}).get('filename') == 'js/sw.js':
+        response.headers['Service-Worker-Allowed'] = '/'
+    if request.endpoint != 'static' or (request.view_args or {}).get('filename', '').startswith('uploads/'):
+        response.headers['Cache-Control'] = 'no-store'
+        response.vary.add('Cookie')
+    return response
 
 # Helper functions
 def allowed_file(filename):
@@ -48,19 +272,23 @@ def login():
     
     if request.method == 'POST':
         # Support both 'username' (from app.py) and 'email' (from routes.py)
-        identifier = request.form.get('email') or request.form.get('username')
-        password = request.form.get('password')
+        identifier = (request.form.get('email') or request.form.get('username') or '').strip()[:120]
+        password = request.form.get('password') or ''
         remember = request.form.get('remember', False) == 'on'
         
         # Search by email or username
-        user = User.query.filter((User.email == identifier) | (User.username == identifier)).first()
+        user = User.query.filter((db.func.lower(User.email) == identifier.lower()) | (db.func.lower(User.username) == identifier.lower())).first()
         
         if user and user.check_password(password):
+            if user.is_admin and password == 'admin123':
+                flash('Reset the legacy administrator password with the local create-admin command before signing in.', 'danger')
+                return render_template('auth/login.html')
+            session.clear()
             login_user(user, remember=remember)
             flash(f'Welcome back, {user.username}!', 'success')
             
             next_page = request.args.get('next')
-            if next_page and next_page.startswith('/'):
+            if is_safe_redirect_target(next_page):
                 return redirect(next_page)
             
             # Redirect admin users to dashboard by default if no next page
@@ -148,6 +376,7 @@ def register():
 
 @main.route('/forgot-password', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
+@limiter.limit("5 per hour", key_func=account_recovery_limit_key, methods=['POST'])
 def forgot_password():
     """Step 1 of password recovery: Verify email and childhood favourite TV show"""
     if current_user.is_authenticated:
@@ -169,7 +398,7 @@ def forgot_password():
             return render_template('auth/forgot_password.html')
             
         user = User.query.filter(db.func.lower(User.email) == email.lower()).first()
-        if user and user.check_security_answer(security_answer):
+        if user and not user.is_admin and user.check_security_answer(security_answer):
             from itsdangerous import URLSafeTimedSerializer
             import hashlib
             serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
@@ -204,7 +433,7 @@ def reset_password():
         user = User.query.get(user_id)
         import hashlib
         current_sig = hashlib.sha256((user.password_hash or '').encode()).hexdigest()[:16] if user else ''
-        if not user or current_sig != data.get('pw_sig'):
+        if not user or user.is_admin or current_sig != data.get('pw_sig'):
             flash('This password reset link has expired or has already been used.', 'warning')
             return redirect(url_for('main.forgot_password'))
     except (SignatureExpired, BadSignature, Exception):
@@ -234,7 +463,7 @@ def reset_password():
     return render_template('auth/reset_password.html', token=token)
 
 
-@main.route('/logout')
+@main.route('/logout', methods=['POST'])
 @login_required
 def logout():
     """User logout"""
@@ -258,7 +487,7 @@ def discover():
     per_page = 24
     
     # Base query
-    comics_query = Comic.query.filter(Comic.visibility == 'public')
+    comics_query = Comic.query.filter(public_comic_filter())
     
     # Apply text search
     if query:
@@ -306,7 +535,9 @@ def tags_autocomplete():
         return jsonify({'tags': []})
     
     # Search matching tags
-    tags = Tag.query.filter(Tag.name.ilike(f'%{query}%')).limit(10).all()
+    tags = Tag.query.join(ComicTag, ComicTag.tag == Tag.name).join(Comic, Comic.id == ComicTag.comic_id).filter(
+        public_comic_filter(), Tag.name.ilike(f'%{query[:100]}%')
+    ).distinct().limit(10).all()
     
     return jsonify({
         'tags': [{'id': t.id, 'name': t.name} for t in tags]
@@ -316,13 +547,13 @@ def tags_autocomplete():
 @main.route('/api/comics/random')
 def random_comic():
     """Get a random comic"""
-    count = Comic.query.filter(Comic.visibility == 'public').count()
+    count = Comic.query.filter(public_comic_filter()).count()
     if count == 0:
         return jsonify({'success': False, 'message': 'No comics available'}), 404
     
     import random
     offset = random.randint(0, count - 1)
-    comic = Comic.query.filter(Comic.visibility == 'public').offset(offset).first()
+    comic = Comic.query.filter(public_comic_filter()).offset(offset).first()
     
     if not comic:
         return jsonify({'success': False, 'message': 'No comics found'}), 404
@@ -332,7 +563,6 @@ def random_comic():
         'comic': {
             'id': comic.id,
             'title': comic.title,
-            'slug': comic.slug,
             'cover_image': comic.cover_image,
             'url': url_for('main.comic_detail', comic_id=comic.id)
         }
@@ -341,41 +571,25 @@ def random_comic():
 
 @main.route('/api/comics/<int:comic_id>/similar')
 def similar_comics(comic_id):
-    """Get similar comics based on category and tags"""
-    comic = Comic.query.get_or_404(comic_id)
-    
-    # Get comics in the same category
+    """Get similar published comics by category and shared tag text."""
+    comic = get_accessible_comic(comic_id)
     similar = Comic.query.filter(
-        Comic.id != comic_id,
-        Comic.visibility == 'public',
-        Comic.category == comic.category
+        Comic.id != comic_id, public_comic_filter(), Comic.category == comic.category
     ).order_by(Comic.average_rating.desc()).limit(6).all()
-    
-    # If not enough in same category, add by shared tags
     if len(similar) < 6:
-        comic_tags = [t.id for t in comic.tags]
-        if comic_tags:
-            additional = Comic.query.filter(
-                Comic.id != comic_id,
-                Comic.visibility == 'public',
-                Comic.id.notin_([c.id for c in similar])
-            ).join(ComicTag).filter(
-                ComicTag.tag_id.in_(comic_tags)
-            ).order_by(Comic.average_rating.desc()).limit(6 - len(similar)).all()
-            similar.extend(additional)
-    
-    return jsonify({
-        'success': True,
-        'comics': [{
-            'id': c.id,
-            'title': c.title,
-            'slug': c.slug,
-            'cover_image': c.cover_image,
-            'author': c.author,
-            'average_rating': c.average_rating,
-            'url': url_for('main.comic_detail', comic_id=c.id)
-        } for c in similar]
-    })
+        tags = [tag.tag for tag in comic.tags]
+        if tags:
+            similar.extend(Comic.query.filter(
+                Comic.id != comic_id, public_comic_filter(),
+                Comic.id.notin_([item.id for item in similar]),
+                Comic.tags.any(ComicTag.tag.in_(tags))
+            ).order_by(Comic.average_rating.desc()).limit(6 - len(similar)).all())
+    return jsonify(success=True, comics=[{
+        'id': item.id, 'title': item.title, 'cover_image': item.cover_image,
+        'cover_url': item.cover_url, 'author': item.author,
+        'average_rating': item.average_rating,
+        'url': url_for('main.comic_detail', comic_id=item.id)
+    } for item in similar])
 
 
 @main.route('/')
@@ -383,16 +597,16 @@ def home():
     """Home page with featured comics and categories"""
     # Get featured comics (highest rated or manually featured)
     featured = Comic.query.filter(
-        (Comic.visibility == 'public') & ((Comic.is_featured == True) | (Comic.average_rating >= 4.0))
+        (public_comic_filter()) & ((Comic.is_featured == True) | (Comic.average_rating >= 4.0))
     ).order_by(Comic.average_rating.desc()).limit(12).all()
     
     # Get recently added
-    recent = Comic.query.filter_by(visibility='public').order_by(
+    recent = Comic.query.filter(public_comic_filter()).order_by(
         Comic.created_at.desc()
     ).limit(12).all()
     
     # Get trending (most views)
-    trending = Comic.query.filter_by(visibility='public').order_by(
+    trending = Comic.query.filter(public_comic_filter()).order_by(
         Comic.view_count.desc()
     ).limit(12).all()
     
@@ -408,7 +622,7 @@ def home():
         
         if latest_progress and latest_progress.percentage < 100:
             comic = Comic.query.get(latest_progress.comic_id)
-            if comic:
+            if comic and comic.can_view(current_user):
                 continue_reading.append({
                     'comic': comic,
                     'current_page': latest_progress.current_page,
@@ -442,7 +656,7 @@ def category_view(slug):
     
     comics_query = Comic.query.filter(
         Comic.category == category.name, 
-        Comic.visibility == 'public'
+        public_comic_filter()
     )
     
     # Sort options
@@ -469,7 +683,7 @@ def trending():
     page = request.args.get('page', 1, type=int)
     per_page = 12
     
-    comics_query = Comic.query.filter_by(visibility='public').order_by(Comic.view_count.desc())
+    comics_query = Comic.query.filter(public_comic_filter()).order_by(Comic.view_count.desc())
     pagination = comics_query.paginate(page=page, per_page=per_page, error_out=False)
     
     return render_template('trending.html', comics=pagination.items, pagination=pagination)
@@ -490,7 +704,7 @@ def search():
     per_page = 12
     
     # Base query
-    comics_query = Comic.query.filter_by(visibility='public')
+    comics_query = Comic.query.filter(public_comic_filter())
     
     # Apply text search
     if query:
@@ -559,6 +773,7 @@ def search():
     
     # Get popular tags for suggestions
     popular_tags = db.session.query(ComicTag.tag, db.func.count(ComicTag.id).label('count'))\
+        .join(Comic, Comic.id == ComicTag.comic_id).filter(public_comic_filter())\
         .group_by(ComicTag.tag)\
         .order_by(db.desc('count'))\
         .limit(20).all()
@@ -585,7 +800,7 @@ def search():
 @main.route('/comic/<int:comic_id>')
 def comic_detail(comic_id):
     """View comic details"""
-    comic = Comic.query.get_or_404(comic_id)
+    comic = get_accessible_comic(comic_id)
     
     # Increment view count
     comic.view_count += 1
@@ -604,7 +819,7 @@ def comic_detail(comic_id):
     related = Comic.query.filter(
         Comic.category == comic.category, 
         Comic.id != comic.id,
-        Comic.visibility == 'public'
+        public_comic_filter()
     ).limit(6).all()
     
     return render_template('comic/detail.html', comic=comic, user_rating=user_rating, in_library=in_library, related=related, user_progress=user_progress)
@@ -613,9 +828,9 @@ def comic_detail(comic_id):
 @main.route('/read/<int:comic_id>')
 def read_comic(comic_id):
     """Read comic online"""
-    comic = Comic.query.get_or_404(comic_id)
+    comic = get_accessible_comic(comic_id)
     
-    if not comic.pdf_file:
+    if not comic.pdf_file and not comic.pages.count():
         flash('This comic is not available for online reading.', 'warning')
         return redirect(url_for('main.comic_detail', comic_id=comic_id))
     
@@ -629,10 +844,11 @@ def read_comic(comic_id):
             db.session.commit()
 
     # Get more comics by same author
-    author_comics = Comic.query.filter(Comic.author == comic.author, Comic.id != comic.id).limit(7).all()
+    author_comics = Comic.query.filter(Comic.author == comic.author, Comic.id != comic.id, public_comic_filter()).limit(7).all()
     
     # Get popular tags and categories
     popular_tags_query = db.session.query(ComicTag.tag, db.func.count(ComicTag.comic_id).label('count'))\
+        .join(Comic, Comic.id == ComicTag.comic_id).filter(public_comic_filter())\
         .group_by(ComicTag.tag)\
         .order_by(db.desc('count'))\
         .limit(10).all()
@@ -651,85 +867,46 @@ def read_comic(comic_id):
 @main.route('/api/comic/<int:comic_id>/pages')
 @limiter.limit("60 per minute")
 def api_comic_pages(comic_id):
-    """API endpoint to get comic pages (extracted images)"""
-    comic = Comic.query.get_or_404(comic_id)
-    
+    """Return only accessible, complete page sequences."""
+    comic = get_accessible_comic(comic_id)
+    records = ComicPage.query.filter_by(comic_id=comic.id).order_by(ComicPage.page_number).all()
+    if records:
+        return jsonify(success=True, comic_id=comic.id, type='images', pages=[{'url': page.image_url} for page in records], total=len(records))
     if not comic.pdf_file:
-        return jsonify({'success': False, 'message': 'No file available'}), 404
-    
-    # 1. Check if ComicPage records exist in database
-    db_pages = ComicPage.query.filter_by(comic_id=comic.id).order_by(ComicPage.page_number.asc()).all()
-    if db_pages:
-        return jsonify({
-            'success': True,
-            'comic_id': comic.id,
-            'type': 'images',
-            'pages': [{'url': p.image_url} for p in db_pages],
-            'total': len(db_pages)
-        })
-
-    # 2. Check if images are already extracted locally on disk
+        return jsonify(success=False, message='No file available'), 404
     pages_dir = os.path.join(current_app.static_folder, 'uploads', 'pages', str(comic.id))
-    image_files = []
-    if os.path.exists(pages_dir):
-        image_files = sorted([f for f in os.listdir(pages_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
-    
-    if image_files:
-        pages = [{'url': f'/static/uploads/pages/{comic.id}/{f}'} for f in image_files]
-        return jsonify({
-            'success': True,
-            'comic_id': comic.id,
-            'type': 'images',
-            'pages': pages,
-            'total': len(pages)
-        })
-
-    # 3. Extract pages on demand
-    cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
+    marker = os.path.join(pages_dir, '.complete')
+    if is_safe_path(os.path.join(current_app.static_folder, 'uploads', 'pages'), marker) and os.path.isfile(marker):
+        try:
+            with open(marker, encoding='ascii') as handle:
+                total = int(handle.read(8))
+            names = [f'page_{index + 1:03d}.jpg' for index in range(total)] if 1 <= total <= current_app.config['MAX_COMIC_PAGES'] else []
+            if names and all(is_safe_path(pages_dir, os.path.join(pages_dir, name)) and os.path.isfile(os.path.join(pages_dir, name)) for name in names):
+                return jsonify(success=True, comic_id=comic.id, type='images', pages=[{'url': f'/static/uploads/pages/{comic.id}/{name}'} for name in names], total=len(names))
+        except (ValueError, OSError):
+            pass
+    cloud_enabled = Setting.get('cloud_storage_enabled') == '1' and comic.visibility == 'public' and comic.is_published
     userhash = Setting.get('catbox_userhash', '')
-    
-    config_dict = {
-        'UPLOAD_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'comics'),
-        'COVERS_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'covers'),
-        'CLOUD_STORAGE_ENABLED': cloud_enabled,
-        'CATBOX_USERHASH': userhash
-    }
-    uploader = create_uploader_from_config(config_dict)
-    
-    # comic.pdf_file can be a local filename or an absolute cloud URL
+    uploader = create_uploader_from_config({
+        'UPLOAD_FOLDER': current_app.config['COMIC_UPLOAD_FOLDER'],
+        'COVERS_FOLDER': current_app.config['COVER_UPLOAD_FOLDER'],
+        'CLOUD_STORAGE_ENABLED': cloud_enabled, 'CATBOX_USERHASH': userhash
+    })
     if comic.pdf_file.startswith(('http://', 'https://')):
-        from security_utils import is_safe_url
-        if not is_safe_url(comic.pdf_file):
-            return jsonify({'success': False, 'message': 'Invalid comic file URL'}), 400
         source_pdf = comic.pdf_file
     else:
         from security_utils import safe_join_path
-        comics_dir = os.path.join(current_app.static_folder, 'uploads', 'comics')
-        source_pdf = safe_join_path(comics_dir, comic.pdf_file)
-        if not source_pdf or not os.path.exists(source_pdf):
-            return jsonify({'success': False, 'message': 'Comic file not found on server'}), 404
-
-    urls = uploader.extract_pages(
-        pdf_input=source_pdf,
-        comic_id=str(comic.id),
-        upload_to_catbox=cloud_enabled,
-        catbox_userhash=userhash
-    )
-
-    if cloud_enabled and urls:
-        # Save to ComicPage database table for instant future retrieval
-        for idx, u in enumerate(urls):
-            db.session.add(ComicPage(comic_id=comic.id, page_number=idx + 1, image_url=u))
+        source_pdf = safe_join_path(current_app.config['COMIC_UPLOAD_FOLDER'], comic.pdf_file)
+        if not source_pdf or not os.path.isfile(source_pdf):
+            return jsonify(success=False, message='Comic file not found'), 404
+    urls = uploader.extract_pages(source_pdf, str(comic.id), upload_to_catbox=cloud_enabled, catbox_userhash=userhash)
+    if not urls:
+        return jsonify(success=False, message='The comic pages could not be extracted safely'), 422
+    if cloud_enabled:
+        for index, url in enumerate(urls):
+            db.session.add(ComicPage(comic_id=comic.id, page_number=index + 1, image_url=url))
         db.session.commit()
-
-    pages = [{'url': url} for url in urls]
-    return jsonify({
-        'success': True,
-        'comic_id': comic.id,
-        'type': 'images',
-        'pages': pages,
-        'total': len(pages)
-    })
+    return jsonify(success=True, comic_id=comic.id, type='images', pages=[{'url': url} for url in urls], total=len(urls))
 
 
 # ============================
@@ -752,10 +929,10 @@ def profile():
     }
     
     recent_comics = db.session.query(Comic).join(UserLibrary).filter(
-        UserLibrary.user_id == current_user.id
+        UserLibrary.user_id == current_user.id, visible_comic_filter()
     ).order_by(UserLibrary.added_at.desc()).limit(5).all()
     
-    return render_template('user/profile.html', stats=stats, recent_comics=recent_comics)
+    return render_template('user/profile.html', user=current_user, stats=stats, recent_comics=recent_comics)
 
 
 @main.route('/library')
@@ -765,7 +942,7 @@ def library():
     page = request.args.get('page', 1, type=int)
     
     pagination = db.session.query(Comic).join(UserLibrary).filter(
-        UserLibrary.user_id == current_user.id
+        UserLibrary.user_id == current_user.id, visible_comic_filter()
     ).order_by(UserLibrary.added_at.desc()).paginate(page=page, per_page=12, error_out=False)
     
     # Calculate dynamic stats
@@ -791,115 +968,43 @@ def library():
 @main.route('/api/toggle_library', methods=['POST'])
 @login_required
 def toggle_library(comic_id=None):
-    """Add or remove comic from user library"""
+    """Add or remove an accessible comic from the current user's library."""
     if comic_id is None:
-        data = request.get_json(silent=True)
-        if data:
-            comic_id = data.get('comic_id')
-    
-    if not comic_id:
-        return jsonify({'success': False, 'error': 'Missing comic_id'}), 400
-        
-    library_item = UserLibrary.query.filter_by(user_id=current_user.id, comic_id=comic_id).first()
-    
-    if library_item:
-        db.session.delete(library_item)
+        comic_id = (request.get_json(silent=True) or {}).get('comic_id')
+    comic_id = require_integer(comic_id, 'comic_id')
+    get_accessible_comic(comic_id)
+    item = UserLibrary.query.filter_by(user_id=current_user.id, comic_id=comic_id).first()
+    if item:
+        db.session.delete(item)
         action = 'removed'
-        in_library = False
     else:
-        library_item = UserLibrary(user_id=current_user.id, comic_id=comic_id)
-        db.session.add(library_item)
+        db.session.add(UserLibrary(user_id=current_user.id, comic_id=comic_id))
         action = 'added'
-        in_library = True
-    
     db.session.commit()
-    
-    if request.is_json or request.path.startswith('/api/'):
-        return jsonify({
-            'success': True, 
-            'action': action, 
-            'in_library': in_library,
-            'message': f'Comic {action} library'
-        })
-    
-    return jsonify({'success': True, 'action': action})
+    return jsonify(success=True, action=action, in_library=action == 'added', message=f'Comic {action} library')
 
 
 @main.route('/api/reading_progress', methods=['POST'])
 @login_required
 def update_reading_progress():
-    """Update reading progress via AJAX"""
-    data = request.get_json(silent=True)
-    if not data:
-        return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
-    
-    comic_id = data.get('comic_id')
-    current_page = data.get('current_page')
-    total_pages = data.get('total_pages')
-    
-    if not comic_id or current_page is None:
-        return jsonify({'success': False, 'error': 'Missing required fields'}), 400
-    
-    progress = ReadingProgress.query.filter_by(
-        user_id=current_user.id, comic_id=comic_id
-    ).first()
-    
-    if progress:
-        progress.current_page = current_page
-        if total_pages:
-            progress.total_pages = total_pages
-        progress.last_read = datetime.utcnow()
-        progress.update_percentage()  # Calculate percentage
-    else:
-        progress = ReadingProgress(
-            user_id=current_user.id,
-            comic_id=comic_id,
-            current_page=current_page,
-            total_pages=total_pages or 0
-        )
-        progress.update_percentage()  # Calculate percentage
-        db.session.add(progress)
-    
-    db.session.commit()
-    return jsonify({'success': True, 'message': 'Progress updated'})
+    """Save progress from the legacy reader endpoint."""
+    return persist_reading_progress(request.get_json(), page_field='current_page')
 @main.route('/api/rate_comic', methods=['POST'])
 @login_required
 def api_rate_comic():
-    """Rate a comic via AJAX"""
-    data = request.get_json(silent=True)
-    if not data:
-        return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
-    
-    comic_id = data.get('comic_id')
-    score = data.get('score') or data.get('rating')
-    
-    if not comic_id or not score:
-        return jsonify({'success': False, 'error': 'Missing comic_id or score'}), 400
-    
-    score = int(score)
-    if not 1 <= score <= 5:
-        return jsonify({'success': False, 'error': 'Score must be between 1 and 5'}), 400
-    
+    """Validate and save a rating for an accessible comic."""
+    data = request.get_json()
+    comic_id = require_integer(data.get('comic_id'), 'comic_id')
+    score = require_integer(data.get('score', data.get('rating')), 'score', maximum=5)
+    comic = get_accessible_comic(comic_id)
     rating = Rating.query.filter_by(user_id=current_user.id, comic_id=comic_id).first()
-    
     if rating:
         rating.score = score
     else:
-        rating = Rating(user_id=current_user.id, comic_id=comic_id, score=score)
-        db.session.add(rating)
-    
-    db.session.commit()
-    
-    # Update comic's average rating
-    comic = Comic.query.get(comic_id)
-    if comic:
-        comic.update_rating()
-        
-    return jsonify({
-        'success': True, 
-        'new_average': round(comic.average_rating, 1) if comic else 0,
-        'total_ratings': comic.ratings.count() if comic else 0
-    })
+        db.session.add(Rating(user_id=current_user.id, comic_id=comic_id, score=score))
+    db.session.flush()
+    comic.update_rating()
+    return jsonify(success=True, new_average=round(comic.average_rating, 1), total_ratings=comic.ratings.count())
 
 
 # ============================
@@ -1042,10 +1147,10 @@ def admin_analytics():
                          recent_activity=recent_activity,
                          top_comics=top_comics,
                          most_viewed=most_viewed,
-                         chart_data_user=json.dumps(chart_data_user),
-                         chart_data_category=json.dumps(chart_data_category),
-                         chart_data_reading=json.dumps(chart_data_reading),
-                         chart_data_rating=json.dumps(chart_data_rating))
+                         chart_data_user=chart_data_user,
+                         chart_data_category=chart_data_category,
+                         chart_data_reading=chart_data_reading,
+                         chart_data_rating=chart_data_rating)
 
 
 @main.route('/admin/comics')
@@ -1073,186 +1178,88 @@ def admin_comics():
 @main.route('/admin/comics/new', methods=['GET', 'POST'])
 @login_required
 def admin_comic_create():
-    """Create new comic manually or via uploader"""
-    if not current_user.is_admin:
-        return redirect(url_for('main.home'))
-    
-    if request.method == 'POST':
-        category_id = request.form.get('category_id')
-        category_name = 'General'
-        if category_id:
-            cat = Category.query.get(category_id)
-            if cat:
-                category_name = cat.name
-
-        def clean_str(s):
-            return bleach.clean(s) if s else s
-            
-        comic = Comic(
-            title=clean_str(request.form.get('title')),
-            author=clean_str(request.form.get('author')),
-            artist=clean_str(request.form.get('artist')),
-            description=clean_str(request.form.get('description')),
-            category=category_name,
-            language=request.form.get('language', 'English'),
-            visibility=request.form.get('visibility', 'public'),
-            pdf_file=format_storage_ref(request.form.get('local_path')),
-            cover_image=format_storage_ref(request.form.get('cover_path')),
-            download_link=request.form.get('download_link'),
-            uploader_id=current_user.id
-        )
-        
-        # Handle manual cover upload if provided (overrides AI extracted cover)
-        if 'cover' in request.files:
-            file = request.files['cover']
-            if file and file.filename:
-                cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
-                userhash = Setting.get('catbox_userhash', '')
-                if cloud_enabled:
-                    service = CatboxService(userhash=userhash)
-                    cover_cloud_url = service.upload_file(file.read(), filename=f"cover_{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}")
-                    if cover_cloud_url:
-                        comic.cover_image = cover_cloud_url
-                else:
-                    filename = secure_filename(file.filename)
-                    unique_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
-                    file.save(os.path.join(current_app.static_folder, 'uploads', 'covers', unique_filename))
-                    comic.cover_image = unique_filename
-        
-        db.session.add(comic)
-        db.session.commit()
-        
-        # Save tags
-        tags_str = request.form.get('tags', '')
-        if tags_str:
-            tags_list = [t.strip() for t in tags_str.split(',') if t.strip()]
-            for t in tags_list:
-                db.session.add(ComicTag(comic_id=comic.id, tag=t))
-            db.session.commit()
-        
-        # Proactively extract pages immediately after posting
-        if comic.pdf_file:
-            cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
-            userhash = Setting.get('catbox_userhash', '')
-            try:
-                config_dict = {
-                    'COVERS_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'covers'),
-                    'CLOUD_STORAGE_ENABLED': cloud_enabled,
-                    'CATBOX_USERHASH': userhash
-                }
-                uploader = create_uploader_from_config(config_dict)
-                
-                if comic.pdf_file.startswith(('http://', 'https://')):
-                    pdf_input = comic.pdf_file
-                else:
-                    pdf_input = os.path.join(current_app.static_folder, 'uploads', 'comics', comic.pdf_file)
-                
-                # Check if pages are already in ComicPage or need extracting
-                existing_pages = ComicPage.query.filter_by(comic_id=comic.id).count()
-                if existing_pages == 0:
-                    page_urls = uploader.extract_pages(
-                        pdf_input=pdf_input,
-                        comic_id=str(comic.id),
-                        upload_to_catbox=cloud_enabled,
-                        catbox_userhash=userhash
-                    )
-                    if cloud_enabled and page_urls:
-                        for idx, purl in enumerate(page_urls):
-                            db.session.add(ComicPage(comic_id=comic.id, page_number=idx + 1, image_url=purl))
-                        db.session.commit()
-                        
-                        # Create Catbox Album grouping all comic files together
-                        if userhash:
-                            try:
-                                album_files = [comic.pdf_file, comic.cover_image] + page_urls
-                                catbox_svc = CatboxService(userhash=userhash)
-                                album_url = catbox_svc.create_album(
-                                    title=comic.title,
-                                    files=album_files,
-                                    desc=f"{comic.title} by {comic.author or 'Unknown'}"
-                                )
-                                if album_url:
-                                    comic.album_url = album_url
-                                    db.session.commit()
-                            except Exception as album_err:
-                                print(f"Catbox album creation error: {album_err}")
-            except Exception as e:
-                print(f"Proactive extraction failed: {str(e)}")
-        
-        flash('Comic created successfully and pages extracted!', 'success')
-        return redirect(url_for('main.admin_comics'))
-    
+    """Create validated metadata and publish only assets suitable for its visibility."""
     categories = Category.query.all()
+    if request.method == 'POST':
+        category_name = 'General'
+        category_id = require_integer(request.form.get('category_id') or None, 'category_id', optional=True)
+        if category_id:
+            category = db.session.get(Category, category_id)
+            if not category:
+                abort(400, description='Unknown category')
+            category_name = category.name
+        pdf_file = storage_reference(request.form.get('local_path'))
+        cover_image = storage_reference(request.form.get('cover_path'))
+        download_link = validated_link(request.form.get('download_link'))
+        cover = request.files.get('cover')
+        visibility = validate_visibility(request.form.get('visibility', 'public'), pdf_file, None if cover and cover.filename else cover_image, download_link)
+        comic = Comic(title=require_text(request.form.get('title'), 'title', 200),
+            author=require_text(request.form.get('author', ''), 'author', 100, allow_empty=True),
+            artist=require_text(request.form.get('artist', ''), 'artist', 100, allow_empty=True),
+            description=require_text(request.form.get('description', ''), 'description', 10000, allow_empty=True),
+            category=category_name, language=require_text(request.form.get('language', 'English'), 'language', 50),
+            visibility=visibility, is_published=visibility != 'draft', pdf_file=pdf_file,
+            cover_image=cover_image, download_link=download_link, uploader_id=current_user.id)
+        tags = clean_tags(request.form.get('tags', ''))
+        cloud_enabled = Setting.get('cloud_storage_enabled') == '1' and visibility == 'public'
+        userhash = Setting.get('catbox_userhash', '')
+        if cover and cover.filename:
+            comic.cover_image = save_cover_upload(cover, cloud_enabled, userhash)
+        db.session.add(comic)
+        db.session.flush()
+        for tag in tags:
+            db.session.add(ComicTag(comic_id=comic.id, tag=tag))
+        db.session.commit()
+        if comic.pdf_file:
+            uploader = create_uploader_from_config({'UPLOAD_FOLDER': current_app.config['COMIC_UPLOAD_FOLDER'],
+                'COVERS_FOLDER': current_app.config['COVER_UPLOAD_FOLDER'], 'CLOUD_STORAGE_ENABLED': cloud_enabled, 'CATBOX_USERHASH': userhash})
+            urls = uploader.extract_pages(comic.pdf_file, str(comic.id), upload_to_catbox=cloud_enabled, catbox_userhash=userhash)
+            if urls and cloud_enabled:
+                for index, url in enumerate(urls):
+                    db.session.add(ComicPage(comic_id=comic.id, page_number=index + 1, image_url=url))
+                db.session.commit()
+                if userhash:
+                    album = CatboxService(userhash).create_album(comic.title, [comic.pdf_file, comic.cover_image] + urls)
+                    if album:
+                        comic.album_url = album
+                        db.session.commit()
+        flash('Comic created successfully.', 'success')
+        return redirect(url_for('main.admin_comics'))
     return render_template('admin/admin_add_comic.html', categories=categories)
 
 
 @main.route('/admin/comics/<int:id>/edit', methods=['GET', 'POST'])
 @login_required
 def admin_comic_edit(id):
-    """Edit existing comic"""
-    if not current_user.is_admin:
-        return redirect(url_for('main.home'))
-    
+    """Validate edits and keep publication state and tags consistent."""
     comic = Comic.query.get_or_404(id)
-    
     if request.method == 'POST':
-        def clean_str(s):
-            return bleach.clean(s) if s else s
-            
-        comic.title = clean_str(request.form.get('title'))
-        comic.author = clean_str(request.form.get('author'))
-        comic.artist = clean_str(request.form.get('artist'))
-        comic.description = clean_str(request.form.get('description'))
-        
-        # Save episode as integer numeric only
-        episode_val = request.form.get('episode')
-        if episode_val:
-            try:
-                comic.episode = str(int(str(episode_val).strip()))
-            except ValueError:
-                comic.episode = None
-        else:
-            comic.episode = None
-            
-        comic.category = request.form.get('category')
-        comic.language = request.form.get('language', 'English')
-        comic.visibility = request.form.get('visibility')
-        comic.is_featured = True if request.form.get('is_featured') == '1' else False
-        comic.download_link = request.form.get('download_link')
-        
-        # Update tags
-        tags_str = request.form.get('tags', '')
-        if tags_str:
-            # Clear existing tags
-            ComicTag.query.filter_by(comic_id=comic.id).delete()
-            # Add new tags
-            tags_list = [t.strip() for t in tags_str.split(',') if t.strip()]
-            for t in tags_list:
-                db.session.add(ComicTag(comic_id=comic.id, tag=t))
-        
-        # Update cover if new one provided
-        if 'cover' in request.files:
-            file = request.files['cover']
-            if file and allowed_file(file.filename):
-                cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
-                userhash = Setting.get('catbox_userhash', '')
-                if cloud_enabled:
-                    service = CatboxService(userhash=userhash)
-                    cover_cloud_url = service.upload_file(file.read(), filename=f"cover_{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}")
-                    if cover_cloud_url:
-                        comic.cover_image = cover_cloud_url
-                else:
-                    filename = secure_filename(file.filename)
-                    unique_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
-                    file.save(os.path.join(current_app.static_folder, 'uploads', 'covers', unique_filename))
-                    comic.cover_image = unique_filename
-        
+        cover = request.files.get('cover')
+        download_link = validated_link(request.form.get('download_link'))
+        visibility = validate_visibility(request.form.get('visibility', comic.visibility), comic.pdf_file, None if cover and cover.filename else comic.cover_image, download_link)
+        comic.title = require_text(request.form.get('title'), 'title', 200)
+        comic.author = require_text(request.form.get('author', ''), 'author', 100, allow_empty=True)
+        comic.artist = require_text(request.form.get('artist', ''), 'artist', 100, allow_empty=True)
+        comic.description = require_text(request.form.get('description', ''), 'description', 10000, allow_empty=True)
+        episode = request.form.get('episode')
+        comic.episode = str(require_integer(episode, 'episode', minimum=0, maximum=1000000)) if episode else None
+        comic.category = require_text(request.form.get('category', comic.category or 'General'), 'category', 50)
+        comic.language = require_text(request.form.get('language', 'English'), 'language', 50)
+        comic.visibility = visibility
+        comic.is_published = visibility != 'draft'
+        comic.is_featured = request.form.get('is_featured') in ('1', 'on', 'true')
+        comic.download_link = download_link
+        tags = clean_tags(request.form.get('tags', ''))
+        ComicTag.query.filter_by(comic_id=comic.id).delete()
+        for tag in tags:
+            db.session.add(ComicTag(comic_id=comic.id, tag=tag))
+        if cover and cover.filename:
+            cloud = Setting.get('cloud_storage_enabled') == '1' and visibility == 'public'
+            comic.cover_image = save_cover_upload(cover, cloud, Setting.get('catbox_userhash', ''))
         db.session.commit()
         flash('Comic updated successfully!', 'success')
         return redirect(url_for('main.admin_comics'))
-    
-    categories = Category.query.all()
-    return render_template('admin/admin_edit_comic.html', comic=comic, categories=categories)
+    return render_template('admin/admin_edit_comic.html', comic=comic, categories=Category.query.all())
 
 
 @main.route('/admin/comics/<int:id>/delete', methods=['POST'])
@@ -1284,10 +1291,10 @@ def admin_chapters(comic_id):
     if not current_user.is_admin:
         return redirect(url_for('main.home'))
     
-    comic = Comic.query.get_or_404(comic_id)
-    chapters = Chapter.query.filter_by(comic_id=comic_id).order_by(Chapter.chapter_number.asc()).all()
-    
-    return render_template('admin/chapters.html', comic=comic, chapters=chapters)
+    comic = get_accessible_comic(comic_id)
+    page = request.args.get('page', 1, type=int)
+    chapters = Chapter.query.filter_by(comic_id=comic_id).order_by(Chapter.chapter_number.asc()).paginate(page=page, per_page=20, error_out=False)
+    return render_template('admin/chapters.html', comic=comic, chapters=chapters, selected_comic=comic_id, comics=Comic.query.all())
 
 
 @main.route('/admin/users')
@@ -1312,25 +1319,34 @@ def admin_users():
 @main.route('/admin/users/<int:id>/edit', methods=['GET', 'POST'])
 @login_required
 def admin_user_edit(id):
-    """Edit user details from admin panel"""
-    if not current_user.is_admin:
-        return redirect(url_for('main.home'))
-    
+    """Validate account edits before changing identity or administrator access."""
+    from security_utils import validate_username, validate_email, validate_password
     user = User.query.get_or_404(id)
-    
     if request.method == 'POST':
-        user.username = request.form.get('username')
-        user.email = request.form.get('email')
-        user.is_admin = request.form.get('is_admin') == 'on'
-        
-        password = request.form.get('password')
+        username = (request.form.get('username') or '').strip()
+        email = (request.form.get('email') or '').strip().lower()
+        password = request.form.get('password') or ''
+        for value, validator in ((username, validate_username), (email, validate_email)):
+            valid, message = validator(value)
+            if not valid:
+                abort(400, description=message)
+        duplicate = User.query.filter(User.id != id, db.or_(db.func.lower(User.username) == username.lower(), db.func.lower(User.email) == email)).first()
+        if duplicate:
+            abort(400, description='Username or email is already registered')
+        is_admin = request.form.get('is_admin') == 'on'
+        if user.is_admin and not is_admin and User.query.filter_by(is_admin=True).count() <= 1:
+            abort(400, description='The last administrator cannot be demoted')
         if password:
+            valid, message = validate_password(password)
+            if not valid or (is_admin and password == 'admin123'):
+                abort(400, description=message or 'The legacy administrator password is not allowed')
             user.set_password(password)
-            
+        user.username, user.email, user.is_admin = username, email, is_admin
+        if is_admin:
+            user.security_answer_hash = None
         db.session.commit()
         flash('User updated successfully!', 'success')
         return redirect(url_for('main.admin_users'))
-    
     return render_template('admin/user_edit.html', user=user)
 
 
@@ -1597,8 +1613,8 @@ def admin_test_catbox():
     userhash = Setting.get('catbox_userhash', '')
     if request.is_json:
         data = request.get_json()
-        if data and 'catbox_userhash' in data:
-            userhash = data.get('catbox_userhash', '')
+        if 'catbox_userhash' in data:
+            userhash = require_text(data['catbox_userhash'], 'catbox_userhash', 128, allow_empty=True)
             
     service = CatboxService(userhash=userhash)
     success, message = service.test_connection(userhash=userhash)
@@ -1608,96 +1624,96 @@ def admin_test_catbox():
 @main.route('/admin/migrate_to_cloud', methods=['POST'])
 @login_required
 def admin_migrate_to_cloud():
-    """Migrate local comic assets (covers, PDFs, extracted pages) to Catbox.moe"""
-    if not current_user.is_admin:
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
-    
-    userhash = Setting.get('catbox_userhash', '')
-    service = CatboxService(userhash=userhash)
-    
-    # Test connection first
-    ok, msg = service.test_connection()
+    """Migrate public assets, committing references before removing local copies."""
+    from security_utils import safe_join_path
+    from upload_utils import validate_pdf, validate_image
+    service = CatboxService(Setting.get('catbox_userhash', ''))
+    ok, message = service.test_connection()
     if not ok:
-        return jsonify({'success': False, 'message': f'Cannot reach Catbox: {msg}'}), 400
-    
-    comics = Comic.query.all()
-    migrated_count = 0
-    covers_migrated = 0
-    pdfs_migrated = 0
-    pages_migrated = 0
-    errors = []
-    
-    for comic in comics:
+        return jsonify(success=False, message='Cloud storage could not be reached'), 502
+    totals = {'comics': 0, 'covers': 0, 'pdfs': 0, 'pages': 0, 'errors': []}
+    for comic in Comic.query.filter(public_comic_filter()).all():
+        removals = []
+        counts = {'covers': 0, 'pdfs': 0, 'pages': 0}
         try:
-            # 1. Migrate cover image
-            if comic.cover_image and not comic.cover_image.startswith(('http://', 'https://')):
-                local_cover = os.path.join(current_app.static_folder, 'uploads', 'covers', comic.cover_image)
-                if os.path.exists(local_cover):
-                    cloud_cover_url = service.upload_file(local_cover)
-                    if cloud_cover_url:
-                        comic.cover_image = cloud_cover_url
-                        covers_migrated += 1
-                        try:
-                            os.remove(local_cover)
-                        except Exception:
-                            pass
-            
-            # 2. Migrate raw comic PDF
-            if comic.pdf_file and not comic.pdf_file.startswith(('http://', 'https://')):
-                local_pdf = os.path.join(current_app.static_folder, 'uploads', 'comics', comic.pdf_file)
-                if os.path.exists(local_pdf):
-                    cloud_pdf_url = service.upload_file(local_pdf)
-                    if cloud_pdf_url:
-                        comic.pdf_file = cloud_pdf_url
-                        pdfs_migrated += 1
-                        try:
-                            os.remove(local_pdf)
-                        except Exception:
-                            pass
-            
-            # 3. Migrate extracted pages
-            local_pages_dir = os.path.join(current_app.static_folder, 'uploads', 'pages', str(comic.id))
-            if os.path.exists(local_pages_dir):
-                page_files = sorted([f for f in os.listdir(local_pages_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
-                if page_files:
-                    # Clean existing ComicPage rows for this comic
+            for attribute, folder_key, kind in (
+                ('cover_image', 'COVER_UPLOAD_FOLDER', 'covers'),
+                ('pdf_file', 'COMIC_UPLOAD_FOLDER', 'pdfs')
+            ):
+                reference = getattr(comic, attribute)
+                if not reference or reference.startswith(('http://', 'https://')):
+                    continue
+                folder = current_app.config[folder_key]
+                path = safe_join_path(folder, reference)
+                if not path or not os.path.isfile(path):
+                    raise ValueError('Local asset is missing or outside its storage folder')
+                with open(path, 'rb') as handle:
+                    data = read_limited(handle)
+                if kind == 'pdfs':
+                    validate_pdf(data)
+                    filename = os.path.basename(path)
+                else:
+                    data = normalized_cover(data, os.path.basename(path))
+                    filename = f'comic_{comic.id}_cover.jpg'
+                url = service.upload_file(data, filename=filename)
+                if not url:
+                    raise ValueError('An asset upload failed')
+                setattr(comic, attribute, url)
+                removals.append((folder, path, attribute, reference))
+                counts[kind] += 1
+            pages_base = os.path.join(current_app.static_folder, 'uploads', 'pages')
+            pages_dir = os.path.join(pages_base, str(comic.id))
+            if not is_safe_path(pages_base, pages_dir):
+                raise ValueError('Invalid page storage path')
+            if os.path.isdir(pages_dir):
+                names = sorted(name for name in os.listdir(pages_dir) if name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')))
+                uploaded = []
+                for name in names:
+                    path = safe_join_path(pages_dir, name)
+                    if not path:
+                        raise ValueError('Invalid page path')
+                    with open(path, 'rb') as handle:
+                        data = read_limited(handle)
+                    validate_image(data, name)
+                    url = service.upload_file(data, filename=f'comic_{comic.id}_{name}')
+                    if not url:
+                        raise ValueError('A page upload failed')
+                    uploaded.append(url)
+                    removals.append((pages_dir, path, None, None))
+                if uploaded:
                     ComicPage.query.filter_by(comic_id=comic.id).delete()
-                    
-                    for idx, pf in enumerate(page_files):
-                        if idx > 0:
-                            import time
-                            time.sleep(0.3)  # Gentle pacing to avoid burst rate-limiting
-                        page_path = os.path.join(local_pages_dir, pf)
-                        page_cloud_url = service.upload_file(page_path)
-                        if page_cloud_url:
-                            db.session.add(ComicPage(comic_id=comic.id, page_number=idx + 1, image_url=page_cloud_url))
-                            pages_migrated += 1
-                            try:
-                                os.remove(page_path)
-                            except Exception:
-                                pass
-                    try:
-                        os.rmdir(local_pages_dir)
-                    except Exception:
-                        pass
-            
+                    for index, url in enumerate(uploaded):
+                        db.session.add(ComicPage(comic_id=comic.id, page_number=index + 1, image_url=url))
+                    counts['pages'] = len(uploaded)
+            # Keep every local file until the database commit has succeeded.
             db.session.commit()
-            migrated_count += 1
-        except Exception as e:
-            errors.append(f"Comic #{comic.id} ('{comic.title}'): {str(e)}")
+            totals['comics'] += 1
+            for kind, count in counts.items():
+                totals[kind] += count
+        except Exception:
             db.session.rollback()
-            
-    return jsonify({
-        'success': True,
-        'message': f"Migration complete! Processed {migrated_count} comics ({covers_migrated} covers, {pdfs_migrated} PDFs, {pages_migrated} pages).",
-        'stats': {
-            'comics': migrated_count,
-            'covers': covers_migrated,
-            'pdfs': pdfs_migrated,
-            'pages': pages_migrated,
-            'errors': errors
-        }
-    })
+            totals['errors'].append(f'Comic #{comic.id}: migration failed; local files were retained.')
+            continue
+        for folder, path, attribute, reference in removals:
+            if attribute and Comic.query.filter(getattr(Comic, attribute) == reference).first():
+                continue  # A different comic still uses this local copy.
+            if is_safe_path(folder, path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    totals['errors'].append(f'Comic #{comic.id}: a local copy could not be removed.')
+        if counts['pages']:
+            marker = os.path.join(pages_dir, '.complete')
+            if is_safe_path(pages_dir, marker):
+                try:
+                    if os.path.isfile(marker):
+                        os.remove(marker)
+                    os.rmdir(pages_dir)
+                except OSError:
+                    pass
+    return jsonify(success=not totals['errors'],
+        message=f"Processed {totals['comics']} public comics.",
+        stats=totals)
 
 
 @main.route('/admin/test_llm', methods=['POST'])
@@ -1726,15 +1742,17 @@ def admin_test_llm():
         if not url.endswith('/chat/completions'):
             url += '/chat/completions'
             
-        response = requests.post(
-            url,
+        response = safe_request(
+            'POST', url,
             headers=headers,
             json={
                 'model': model,
                 'messages': [{'role': 'user', 'content': 'Hello'}],
                 'max_tokens': 10
             },
-            timeout=10
+            timeout=10,
+            allow_local=Setting.get('llm_use_local') == '1',
+            require_https=bool(api_key) and Setting.get('llm_use_local') != '1'
         )
         
         if response.status_code == 200:
@@ -1770,7 +1788,7 @@ def admin_test_upfiles():
             ('file', ('test.txt', test_file, 'text/plain'))
         ]
         
-        response = requests.post(endpoint, files=files, timeout=30)
+        response = safe_request('POST', endpoint, files=files, timeout=30, require_https=True)
         result = response.json()
         
         if result.get('status') == 'success':
@@ -1798,7 +1816,7 @@ def admin_unified_upload():
     
     try:
         # Load config for uploader
-        cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
+        cloud_enabled = Setting.get('cloud_storage_enabled') == '1' and request.form.get('visibility', 'draft') == 'public'
         userhash = Setting.get('catbox_userhash', '')
         config_dict = {
             'UPLOAD_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'comics'),
@@ -1816,7 +1834,7 @@ def admin_unified_upload():
         uploader = create_uploader_from_config(config_dict)
         
         # Check if we should upload to upfiles now
-        should_upload = request.form.get('upload_to_upfiles', 'true').lower() == 'true'
+        should_upload = bool(uploader.upfiles_api_key) and request.form.get('upload_to_upfiles', 'true').lower() == 'true'
         
         # Run upload workflow
         result = uploader.upload_comic(
@@ -1841,7 +1859,8 @@ def admin_unified_upload():
                 }
             })
         else:
-            return jsonify({'success': False, 'message': f"Process failed: {', '.join(result['errors'])}"}), 500
+            status = 400 if result.get('validation_error') else 502
+            return jsonify({'success': False, 'message': f"Process failed: {', '.join(result['errors'])}"}), status
             
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -1850,63 +1869,21 @@ def admin_unified_upload():
 @main.route('/admin/upload_to_host', methods=['POST'])
 @login_required
 def admin_upload_to_host():
-    """Upload a locally stored or cloud-hosted file to UpFiles on demand"""
-    if not current_user.is_admin:
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
-    
-    data = request.get_json() or {}
-    local_filename = data.get('local_path')
-    
-    if not local_filename:
-        return jsonify({'success': False, 'message': 'No local path or URL provided'}), 400
-    
-    try:
-        config_dict = {
-            'UPFILES_API_KEY': Setting.get('upfiles_token'),
-            'UPFILES_ENDPOINT': Setting.get('upfiles_endpoint', 'https://api.upfiles.com/upload')
-        }
-        uploader = create_uploader_from_config(config_dict)
-        
-        # Check if local_filename is an absolute cloud URL (e.g. Catbox)
-        if local_filename.startswith(('http://', 'https://')):
-            from security_utils import is_safe_url
-            if not is_safe_url(local_filename):
-                return jsonify({'success': False, 'message': 'Invalid or restricted remote URL'}), 400
-                
-            from catbox_service import get_catbox_session
-            session = get_catbox_session()
-            resp = session.get(local_filename, timeout=120)
-            if resp.status_code == 200 and resp.content:
-                fname = os.path.basename(local_filename.split('?')[0])
-                if not fname.lower().endswith('.pdf'):
-                    fname += '.pdf'
-                upfiles_result = uploader._upload_to_upfiles(resp.content, filename=fname)
-            else:
-                return jsonify({'success': False, 'message': f'Failed to retrieve file from cloud storage ({resp.status_code})'}), 400
-        else:
-            # Secure the filename and build full local path
-            from security_utils import safe_join_path
-            comics_dir = os.path.join(current_app.static_folder, 'uploads', 'comics')
-            local_path = safe_join_path(comics_dir, local_filename)
-            
-            if not local_path or not os.path.exists(local_path):
-                return jsonify({'success': False, 'message': f'File not found: {local_filename}'}), 404
-            
-            upfiles_result = uploader._upload_to_upfiles(local_path)
-        
-        if upfiles_result.get('success'):
-            return jsonify({
-                'success': True,
-                'upfiles_url': upfiles_result.get('url')
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': upfiles_result.get('message', 'Upload failed')
-            })
-            
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+    """Upload a bounded and validated comic to the configured host."""
+    data = request.get_json()
+    reference = data.get('local_path')
+    if not isinstance(reference, str) or not reference:
+        abort(400, description='A local comic reference or URL is required')
+    uploader = create_uploader_from_config({'UPLOAD_FOLDER': current_app.config['COMIC_UPLOAD_FOLDER'],
+        'COVERS_FOLDER': current_app.config['COVER_UPLOAD_FOLDER'],
+        'UPFILES_API_KEY': Setting.get('upfiles_token'), 'UPFILES_ENDPOINT': Setting.get('upfiles_endpoint', 'https://api.upfiles.com/upload')})
+    known = Comic.query.filter_by(pdf_file=format_storage_ref(reference)).all()
+    if data.get('visibility', 'public') != 'public' or (known and not any(comic.visibility == 'public' and comic.is_published for comic in known)):
+        abort(400, description='Publish the comic before sending it to a public upload host')
+    result = uploader._upload_to_upfiles(reference)
+    if result.get('success'):
+        return jsonify(success=True, upfiles_url=result.get('url'))
+    return jsonify(success=False, message=result.get('message', 'Upload failed')), 400
 
 @main.route('/admin/bulk_upload', methods=['GET'])
 @login_required
@@ -1934,7 +1911,7 @@ def admin_bulk_upload_file():
         
     try:
         # Load config for uploader
-        cloud_enabled = Setting.get('cloud_storage_enabled') == '1'
+        cloud_enabled = False  # Drafts stay in protected local storage.
         userhash = Setting.get('catbox_userhash', '')
         config_dict = {
             'UPLOAD_FOLDER': os.path.join(current_app.static_folder, 'uploads', 'comics'),
@@ -1952,7 +1929,7 @@ def admin_bulk_upload_file():
         uploader = create_uploader_from_config(config_dict)
         
         # Decide if we should upload to upfiles (same as single uploader, if key exists)
-        should_upload = bool(Setting.get('upfiles_token'))
+        should_upload = False  # Public hosting starts only after publication.
         
         # Run AI upload workflow
         result = uploader.upload_comic(
@@ -1963,6 +1940,8 @@ def admin_bulk_upload_file():
         )
         
         if not result.get('local_path'):
+            if result.get('validation_error'):
+                return jsonify(success=False, message='A valid PDF within the file limits is required'), 400
             return jsonify({'success': False, 'message': f"Process failed: {', '.join(result['errors'])}"}), 500
             
         metadata = result.get('metadata') or {}
@@ -2067,72 +2046,31 @@ def admin_bulk_upload_file():
 @login_required
 @limiter.limit("30 per minute")
 def create_bookmark():
-    """Create a new bookmark"""
-    data = request.get_json(silent=True)
-    if not data:
-        return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
-    
-    comic_id = data.get('comic_id')
-    chapter_id = data.get('chapter_id')
-    page_number = data.get('page_number')
-    from security_utils import sanitize_plain_text
-    note = sanitize_plain_text(data.get('note', ''), max_length=255)
-    
-    if not all([comic_id, page_number]):
-        return jsonify({'success': False, 'message': 'Missing required fields'}), 400
-    
-    # Check for duplicate bookmark at same location
-    existing = Bookmark.query.filter_by(
-        user_id=current_user.id,
-        comic_id=comic_id,
-        page_number=page_number
-    ).filter(
-        Bookmark.chapter_id == chapter_id if chapter_id else True
-    ).first()
-    
+    """Create a bookmark only for an accessible comic and matching chapter."""
+    data = request.get_json()
+    comic_id = require_integer(data.get('comic_id'), 'comic_id')
+    page_number = require_integer(data.get('page_number'), 'page_number', maximum=current_app.config['MAX_COMIC_PAGES'])
+    get_accessible_comic(comic_id)
+    chapter_id = validate_chapter(comic_id, data.get('chapter_id'))
+    note = require_text(data.get('note', ''), 'note', 255, allow_empty=True)
+    existing = Bookmark.query.filter_by(user_id=current_user.id, comic_id=comic_id, chapter_id=chapter_id, page_number=page_number).first()
     if existing:
-        return jsonify({'success': False, 'message': 'Bookmark already exists at this page'}), 409
-    
-    bookmark = Bookmark(
-        user_id=current_user.id,
-        comic_id=comic_id,
-        chapter_id=chapter_id,
-        page_number=page_number,
-        note=note
-    )
+        return jsonify(success=False, message='Bookmark already exists at this page'), 409
+    bookmark = Bookmark(user_id=current_user.id, comic_id=comic_id, chapter_id=chapter_id, page_number=page_number, note=note)
     db.session.add(bookmark)
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'bookmark': {
-            'id': bookmark.id,
-            'page_number': bookmark.page_number,
-            'note': bookmark.note,
-            'created_at': bookmark.created_at.isoformat() if bookmark.created_at else None
-        }
-    })
+    return jsonify(success=True, bookmark=bookmark.to_dict())
 
 
 @main.route('/api/bookics/<int:comic_id>')
+@main.route('/api/bookmarks/<int:comic_id>')
+@main.route('/api/comics/<int:comic_id>/bookmarks')
 @login_required
 def get_comic_bookmarks(comic_id):
-    """Get all bookmarks for a comic"""
-    bookmarks = Bookmark.query.filter_by(
-        user_id=current_user.id,
-        comic_id=comic_id
-    ).order_by(Bookmark.page_number).all()
-    
-    return jsonify({
-        'success': True,
-        'bookmarks': [{
-            'id': b.id,
-            'chapter_id': b.chapter_id,
-            'page_number': b.page_number,
-            'note': b.note,
-            'created_at': b.created_at.isoformat() if b.created_at else None
-        } for b in bookmarks]
-    })
+    """Get the current user's bookmarks for an accessible comic."""
+    get_accessible_comic(comic_id)
+    bookmarks = Bookmark.query.filter_by(user_id=current_user.id, comic_id=comic_id).order_by(Bookmark.page_number).all()
+    return jsonify(success=True, bookmarks=[bookmark.to_dict() for bookmark in bookmarks])
 
 
 @main.route('/api/bookmarks/<int:bookmark_id>', methods=['DELETE'])
@@ -2160,52 +2098,15 @@ def delete_bookmark(bookmark_id):
 @main.route('/api/reading-progress', methods=['POST'])
 @login_required
 def save_reading_progress():
-    """Save reading progress for a comic"""
-    data = request.get_json(silent=True)
-    if not data:
-        return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
-    
-    comic_id = data.get('comic_id')
-    chapter_id = data.get('chapter_id')
-    page_number = data.get('page_number')
-    total_pages = data.get('total_pages')
-    time_spent = data.get('time_spent', 0)
-    
-    if not comic_id or page_number is None:
-        return jsonify({'success': False, 'message': 'Missing required fields'}), 400
-    
-    progress = ReadingProgress.query.filter_by(
-        user_id=current_user.id,
-        comic_id=comic_id,
-        chapter_id=chapter_id
-    ).first()
-    
-    if progress:
-        progress.current_page = page_number
-        progress.total_pages = total_pages or progress.total_pages
-        progress.time_spent = (progress.time_spent or 0) + time_spent
-        progress.last_read = datetime.utcnow()
-        progress.update_percentage()
-    else:
-        progress = ReadingProgress(
-            user_id=current_user.id,
-            comic_id=comic_id,
-            chapter_id=chapter_id,
-            current_page=page_number,
-            total_pages=total_pages,
-            time_spent=time_spent
-        )
-        db.session.add(progress)
-    
-    db.session.commit()
-    
-    return jsonify({'success': True, 'message': 'Progress saved'})
+    """Save progress from the chapter-aware reader endpoint."""
+    return persist_reading_progress(request.get_json(), page_field='page_number')
 
 
 @main.route('/api/reading-progress/<int:comic_id>')
 @login_required
 def get_reading_progress(comic_id):
     """Get reading progress for a comic"""
+    get_accessible_comic(comic_id)
     progress = ReadingProgress.query.filter_by(
         user_id=current_user.id,
         comic_id=comic_id
@@ -2221,7 +2122,7 @@ def get_reading_progress(comic_id):
             'current_page': progress.current_page,
             'total_pages': progress.total_pages,
             'percentage': progress.percentage,
-            'last_read': progress.last_read.isoformat() if progress.last_read else None
+            'last_read': utc_isoformat(progress.last_read) if progress.last_read else None
         }
     })
 
@@ -2232,53 +2133,28 @@ def get_reading_progress(comic_id):
 
 @main.route('/api/comics/<int:comic_id>/chapters')
 def get_comic_chapters(comic_id):
-    """Get all chapters for a comic"""
-    chapters = Chapter.query.filter_by(comic_id=comic_id).order_by(Chapter.number).all()
-    
-    return jsonify({
-        'success': True,
-        'chapters': [{
-            'id': c.id,
-            'number': c.number,
-            'title': c.title
-        } for c in chapters]
-    })
+    """Get ordered chapters for an accessible comic."""
+    get_accessible_comic(comic_id)
+    chapters = Chapter.query.filter_by(comic_id=comic_id).order_by(Chapter.chapter_number).all()
+    return jsonify(success=True, chapters=[{'id': chapter.id, 'number': chapter.chapter_number, 'title': chapter.title} for chapter in chapters])
 
 
 @main.route('/api/chapters/<int:chapter_id>/next')
 def get_next_chapter(chapter_id):
-    """Get the next chapter"""
+    """Get the next chapter without exposing private comic metadata."""
     chapter = Chapter.query.get_or_404(chapter_id)
-    next_chapter = Chapter.query.filter(
-        Chapter.comic_id == chapter.comic_id,
-        Chapter.number > chapter.number
-    ).order_by(Chapter.number).first()
-    
-    return jsonify({
-        'chapter': {
-            'id': next_chapter.id,
-            'number': next_chapter.number,
-            'title': next_chapter.title
-        } if next_chapter else None
-    })
+    get_accessible_comic(chapter.comic_id)
+    following = Chapter.query.filter(Chapter.comic_id == chapter.comic_id, Chapter.chapter_number > chapter.chapter_number).order_by(Chapter.chapter_number).first()
+    return jsonify(chapter={'id': following.id, 'number': following.chapter_number, 'title': following.title} if following else None)
 
 
 @main.route('/api/chapters/<int:chapter_id>/prev')
 def get_prev_chapter(chapter_id):
-    """Get the previous chapter"""
+    """Get the previous chapter without exposing private comic metadata."""
     chapter = Chapter.query.get_or_404(chapter_id)
-    prev_chapter = Chapter.query.filter(
-        Chapter.comic_id == chapter.comic_id,
-        Chapter.number < chapter.number
-    ).order_by(Chapter.number.desc()).first()
-    
-    return jsonify({
-        'chapter': {
-            'id': prev_chapter.id,
-            'number': prev_chapter.number,
-            'title': prev_chapter.title
-        } if prev_chapter else None
-    })
+    get_accessible_comic(chapter.comic_id)
+    previous = Chapter.query.filter(Chapter.comic_id == chapter.comic_id, Chapter.chapter_number < chapter.chapter_number).order_by(Chapter.chapter_number.desc()).first()
+    return jsonify(chapter={'id': previous.id, 'number': previous.chapter_number, 'title': previous.title} if previous else None)
 
 
 # ============================
@@ -2295,122 +2171,78 @@ def get_prev_chapter(chapter_id):
 @login_required
 @limiter.limit("20 per minute")
 def create_comment(comic_id):
-    """Create a new comment on a comic"""
+    """Create a comment with validated parent, chapter, and privacy."""
+    get_accessible_comic(comic_id)
     data = request.get_json()
-    
-    if not data or not data.get('content'):
-        return jsonify({'success': False, 'message': 'Content is required'}), 400
-    
-    from security_utils import sanitize_plain_text
-    clean_content = sanitize_plain_text(data.get('content'), max_length=1000)
-    if not clean_content:
-        return jsonify({'success': False, 'message': 'Valid content is required'}), 400
-    
-    # Validate comic exists
-    comic = Comic.query.get_or_404(comic_id)
-    
-    comment = Comment(
-        user_id=current_user.id,
-        comic_id=comic_id,
-        content=clean_content,
-        chapter_id=data.get('chapter_id'),
-        parent_id=data.get('parent_id'),
-        is_spoiler=data.get('is_spoiler', False)
-    )
-    
+    content = require_text(data.get('content'), 'content', 1000)
+    chapter_id = validate_chapter(comic_id, data.get('chapter_id'))
+    parent_id = require_integer(data.get('parent_id'), 'parent_id', optional=True)
+    if parent_id is not None:
+        parent = db.session.get(Comment, parent_id)
+        if not parent or parent.comic_id != comic_id or parent.is_hidden or (chapter_id is not None and parent.chapter_id != chapter_id):
+            abort(400, description='The parent comment must belong to this comic and chapter')
+        ancestor, depth = parent, 0
+        while ancestor:
+            depth += 1
+            if depth > 20:
+                abort(400, description='The maximum reply depth has been reached')
+            ancestor = ancestor.parent
+    spoiler = require_boolean(data.get('is_spoiler', False), 'is_spoiler')
+    comment = Comment(user_id=current_user.id, comic_id=comic_id, chapter_id=chapter_id, parent_id=parent_id, content=content, is_spoiler=spoiler)
     db.session.add(comment)
-    
-    # Create activity for top-level comments
-    if not comment.parent_id:
-        activity = Activity(
-            user_id=current_user.id,
-            activity_type='comment',
-            comic_id=comic_id,
-            chapter_id=comment.chapter_id
-        )
-        db.session.add(activity)
-    
+    if parent_id is None:
+        comic = db.session.get(Comic, comic_id)
+        db.session.add(Activity(user_id=current_user.id, activity_type='comment', comic_id=comic_id, chapter_id=chapter_id, is_public=comic.visibility == 'public' and comic.is_published))
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'comment': comment.to_dict()
-    }), 201
+    return jsonify(success=True, comment=comment.to_dict()), 201
 
 
 @main.route('/api/comments/<int:comment_id>', methods=['PUT'])
 @login_required
 @limiter.limit("20 per minute")
 def update_comment(comment_id):
-    """Update a comment"""
-    comment = Comment.query.get_or_404(comment_id)
-    
+    """Update only the current user's comment."""
+    comment = get_accessible_comment(comment_id, owner_access=True)
     if comment.user_id != current_user.id:
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
-    
+        abort(403)
     data = request.get_json()
-    if data and data.get('content'):
-        from security_utils import sanitize_plain_text
-        clean_content = sanitize_plain_text(data['content'], max_length=1000)
-        if not clean_content:
-            return jsonify({'success': False, 'message': 'Valid content is required'}), 400
-        comment.content = clean_content
-    if data and 'is_spoiler' in data:
-        comment.is_spoiler = data['is_spoiler']
-    
+    if 'content' in data:
+        comment.content = require_text(data['content'], 'content', 1000)
+    if 'is_spoiler' in data:
+        comment.is_spoiler = require_boolean(data['is_spoiler'], 'is_spoiler')
     comment.updated_at = datetime.utcnow()
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'comment': comment.to_dict()
-    })
+    return jsonify(success=True, comment=comment.to_dict())
 
 
 @main.route('/api/comments/<int:comment_id>', methods=['DELETE'])
 @login_required
 def delete_comment(comment_id):
-    """Delete a comment"""
-    comment = Comment.query.get_or_404(comment_id)
-    
+    """Delete an owned comment, or moderate it as an administrator."""
+    comment = get_accessible_comment(comment_id, owner_access=True)
     if comment.user_id != current_user.id and not current_user.is_admin:
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
-    
+        abort(403)
     db.session.delete(comment)
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': 'Comment deleted'
-    })
+    return jsonify(success=True, message='Comment deleted')
 
 
 @main.route('/api/comments/<int:comment_id>/like', methods=['POST'])
 @login_required
 def like_comment(comment_id):
-    """Like/unlike a comment"""
-    comment = Comment.query.get_or_404(comment_id)
-    
-    existing_like = CommentLike.query.filter_by(
-        user_id=current_user.id,
-        comment_id=comment_id
-    ).first()
-    
-    if existing_like:
-        db.session.delete(existing_like)
+    """Toggle a like and keep the displayed count consistent."""
+    comment = get_accessible_comment(comment_id)
+    existing = CommentLike.query.filter_by(user_id=current_user.id, comment_id=comment_id).first()
+    if existing:
+        db.session.delete(existing)
         liked = False
     else:
-        like = CommentLike(user_id=current_user.id, comment_id=comment_id)
-        db.session.add(like)
+        db.session.add(CommentLike(user_id=current_user.id, comment_id=comment_id))
         liked = True
-    
+    db.session.flush()
+    comment.likes_count = CommentLike.query.filter_by(comment_id=comment_id).count()
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'liked': liked,
-        'likes_count': comment.likes_count
-    })
+    return jsonify(success=True, liked=liked, likes_count=comment.likes_count)
 
 
 # --- Reading Lists ---
@@ -2418,96 +2250,53 @@ def like_comment(comment_id):
 @main.route('/api/reading-lists')
 @login_required
 def get_user_reading_lists():
-    """Get user's reading lists"""
+    """Get the current user's lists with accessible item counts."""
     lists = ReadingList.query.filter_by(user_id=current_user.id).order_by(ReadingList.created_at.desc()).all()
-    
-    return jsonify({
-        'success': True,
-        'reading_lists': [lst.to_dict() for lst in lists]
-    })
+    return jsonify(success=True, reading_lists=[serialize_reading_list(item) for item in lists])
 
 
 @main.route('/api/reading-lists', methods=['POST'])
 @login_required
 @limiter.limit("30 per minute")
 def create_reading_list():
-    """Create a new reading list"""
+    """Create a validated reading list and its linked activity."""
     data = request.get_json()
-    
-    if not data or not data.get('title'):
-        return jsonify({'success': False, 'message': 'Title is required'}), 400
-    
-    from security_utils import sanitize_plain_text
-    clean_title = sanitize_plain_text(data.get('title'), max_length=100)
-    if not clean_title:
-        return jsonify({'success': False, 'message': 'Valid title is required'}), 400
-    
-    clean_desc = sanitize_plain_text(data.get('description', ''), max_length=500)
-    
-    reading_list = ReadingList(
-        user_id=current_user.id,
-        title=clean_title,
-        description=clean_desc,
-        is_public=data.get('is_public', True)
-    )
-    
+    title = require_text(data.get('title'), 'title', 100)
+    description = require_text(data.get('description', ''), 'description', 500, allow_empty=True)
+    is_public = require_boolean(data.get('is_public', True), 'is_public')
+    reading_list = ReadingList(user_id=current_user.id, title=title, description=description, is_public=is_public)
     db.session.add(reading_list)
-    
-    # Create activity
-    activity = Activity(
-        user_id=current_user.id,
-        activity_type='list_create',
-        reading_list_id=reading_list.id
-    )
-    db.session.add(activity)
-    
+    db.session.flush()
+    db.session.add(Activity(user_id=current_user.id, activity_type='list_create', reading_list_id=reading_list.id, is_public=is_public))
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'reading_list': reading_list.to_dict()
-    }), 201
+    return jsonify(success=True, reading_list=serialize_reading_list(reading_list)), 201
 
 
 @main.route('/api/reading-lists/<int:list_id>')
 def get_reading_list(list_id):
-    """Get a reading list with its items"""
+    """Get a public or owned reading list without leaking private comic items."""
     reading_list = ReadingList.query.get_or_404(list_id)
-    
     if not reading_list.is_public and (not current_user.is_authenticated or reading_list.user_id != current_user.id):
-        return jsonify({'success': False, 'message': 'Not found'}), 404
-    
-    return jsonify({
-        'success': True,
-        'reading_list': reading_list.to_dict(include_items=True)
-    })
+        abort(404)
+    return jsonify(success=True, reading_list=serialize_reading_list(reading_list, include_items=True))
 
 
 @main.route('/api/reading-lists/<int:list_id>', methods=['PUT'])
 @login_required
 def update_reading_list(list_id):
-    """Update a reading list"""
+    """Persist sanitized edits to the mapped title field."""
     reading_list = ReadingList.query.get_or_404(list_id)
-    
     if reading_list.user_id != current_user.id:
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
-    
+        abort(403)
     data = request.get_json()
-    if data.get('name'):
-        reading_list.name = data['name'][:100]
-    elif data.get('title'):
-        reading_list.name = data['title'][:100]
+    if 'title' in data or 'name' in data:
+        reading_list.title = require_text(data.get('title', data.get('name')), 'title', 100)
     if 'description' in data:
-        reading_list.description = data['description'][:500]
+        reading_list.description = require_text(data['description'], 'description', 500, allow_empty=True)
     if 'is_public' in data:
-        reading_list.is_public = data['is_public']
-    
+        reading_list.is_public = require_boolean(data['is_public'], 'is_public')
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'reading_list': reading_list.to_dict()
-    })
+    return jsonify(success=True, reading_list=serialize_reading_list(reading_list))
 
 
 @main.route('/api/reading-lists/<int:list_id>', methods=['DELETE'])
@@ -2538,12 +2327,8 @@ def add_to_reading_list(list_id):
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     
     data = request.get_json()
-    comic_id = data.get('comic_id')
-    
-    if not comic_id:
-        return jsonify({'success': False, 'message': 'Comic ID is required'}), 400
-    
-    comic = Comic.query.get_or_404(comic_id)
+    comic_id = require_integer(data.get('comic_id'), 'comic_id')
+    comic = get_accessible_comic(comic_id)
     
     # Check if already in list
     existing = ReadingListItem.query.filter_by(
@@ -2570,7 +2355,8 @@ def add_to_reading_list(list_id):
         user_id=current_user.id,
         activity_type='add_to_list',
         comic_id=comic_id,
-        reading_list_id=list_id
+        reading_list_id=list_id,
+        is_public=reading_list.is_public and comic.visibility == 'public' and comic.is_published
     )
     db.session.add(activity)
     
@@ -2632,128 +2418,71 @@ def remove_comic_from_reading_list(list_id, comic_id):
 
 
 @main.route('/reading-list/<int:list_id>')
-@login_required
 def view_reading_list(list_id):
-    """View a reading list with its comics"""
+    """Render an owned or public collection with only accessible comics."""
     reading_list = ReadingList.query.get_or_404(list_id)
-    
-    # Check access
-    if reading_list.user_id != current_user.id and not reading_list.is_public:
-        abort(403)
-    
-    items = ReadingListItem.query.filter_by(reading_list_id=list_id).join(
-        Comic
-    ).order_by(ReadingListItem.added_at.desc()).all()
-    
-    comics = [item.comic for item in items]
-    
-    return render_template(
-        'user/reading_list_detail.html',
-        reading_list=reading_list,
-        comics=comics,
-        title=reading_list.name
-    )
+    if not reading_list.is_public and (not current_user.is_authenticated or reading_list.user_id != current_user.id):
+        abort(404)
+    items = ReadingListItem.query.filter_by(reading_list_id=list_id).order_by(ReadingListItem.order, ReadingListItem.added_at).all()
+    comics = [item.comic for item in items if item.comic and item.comic.can_view(current_user)]
+    return render_template('user/reading_list_detail.html', reading_list=reading_list, comics=comics, title=reading_list.title)
 
 
 # --- Comment System ---
 
 @main.route('/api/comics/<int:comic_id>/comments')
 def get_comic_comments(comic_id):
-    """Get comments for a comic"""
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-    
-    # Get top-level comments only
-    comments = Comment.query.filter_by(
-        comic_id=comic_id,
-        parent_id=None
-    ).order_by(Comment.created_at.desc()).paginate(
-        page=page, per_page=per_page, error_out=False
-    )
-    
-    # Get user's liked comment IDs if logged in
-    user_liked = set()
+    """Get visible top-level comments with bounded pagination."""
+    get_accessible_comic(comic_id)
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = max(1, min(100, request.args.get('per_page', 20, type=int)))
+    comments = Comment.query.filter_by(comic_id=comic_id, parent_id=None, is_hidden=False).order_by(Comment.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    liked = []
     if current_user.is_authenticated:
-        liked = CommentLike.query.filter_by(user_id=current_user.id).filter(
-            CommentLike.comment_id.in_([c.id for c in comments.items])
-        ).all()
-        user_liked = {like.comment_id for like in liked}
-    
-    return jsonify({
-        'success': True,
-        'comments': [c.to_dict() for c in comments.items],
-        'user_liked': list(user_liked),
-        'total': comments.total,
-        'pages': comments.pages,
-        'current_page': page
-    })
+        liked = [item.comment_id for item in CommentLike.query.filter_by(user_id=current_user.id).filter(CommentLike.comment_id.in_([comment.id for comment in comments.items])).all()]
+    return jsonify(success=True, comments=[comment.to_dict() for comment in comments.items], user_liked=liked, total=comments.total, pages=comments.pages, current_page=page)
+
+
+@main.route('/api/comments/<int:comment_id>/replies')
+def get_comment_replies(comment_id):
+    """Return the visible replies requested by the comment widget."""
+    parent = get_accessible_comment(comment_id)
+    page = max(1, request.args.get('page', 1, type=int))
+    replies = Comment.query.filter_by(parent_id=parent.id, is_hidden=False).order_by(Comment.created_at).paginate(page=page, per_page=100, error_out=False)
+    return jsonify(success=True, replies=[reply.to_dict() for reply in replies.items], total=replies.total, pages=replies.pages)
 
 
 # ============================
 # Error Handlers
 # ============================
 
-def log_error_to_json(error):
-    """Log crash details to debug.json"""
+def log_error(error):
+    """Log useful stack locations without passwords, reset tokens, or SQL values."""
     import traceback
-    import json
-    try:
-        debug_file_path = os.path.join(current_app.root_path, 'debug.json')
-        
-        # Build error info dict
-        error_info = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'error_type': type(error).__name__,
-            'error_message': str(error),
-            'url': request.url,
-            'method': request.method,
-            'query_params': dict(request.args),
-            'user': current_user.username if (current_user and current_user.is_authenticated) else 'Anonymous',
-            'traceback': traceback.format_exc()
-        }
-        
-        # Read existing records
-        logs = []
-        if os.path.exists(debug_file_path):
-            try:
-                with open(debug_file_path, 'r', encoding='utf-8') as f:
-                    logs = json.load(f)
-                    if not isinstance(logs, list):
-                        logs = []
-            except Exception:
-                logs = []
-                
-        # Append new log
-        logs.append(error_info)
-        
-        # Limit to last 50 errors
-        logs = logs[-50:]
-        
-        with open(debug_file_path, 'w', encoding='utf-8') as f:
-            json.dump(logs, f, indent=4, ensure_ascii=False)
-    except Exception as log_ex:
-        print(f"Error logging failed: {log_ex}")
+    stack = ''.join(traceback.format_list(traceback.extract_tb(error.__traceback__)))
+    current_app.logger.error('Unhandled %s for %s %s\n%s', type(error).__name__, request.method, request.path, stack)
 
 @main.app_errorhandler(404)
 def page_not_found(e):
+    if wants_json_response():
+        return jsonify(success=False, message='Not found'), 404
     return render_template('errors/404.html'), 404
 
 @main.app_errorhandler(Exception)
-def handle_exception(e):
+def handle_exception(error):
     from werkzeug.exceptions import HTTPException
-    # Rollback session to clear any failed transaction states before rendering templates
-    try:
-        db.session.rollback()
-    except Exception:
-        pass
-
-    if not isinstance(e, HTTPException) or e.code == 500:
-        log_error_to_json(e)
-        
-    if isinstance(e, HTTPException):
-        if e.code == 404:
-            return render_template('errors/404.html'), 404
-        return render_template('errors/500.html'), e.code
+    db.session.rollback()
+    if isinstance(error, HTTPException):
+        response = error.get_response()
+        if wants_json_response():
+            response.data = current_app.json.dumps({'success': False, 'message': error.description, 'error': error.name})
+            response.content_type = 'application/json'
+        else:
+            response.data = render_template('errors/http.html', error=error)
+        return response
+    log_error(error)
+    if wants_json_response():
+        return jsonify(success=False, message='Internal server error'), 500
     return render_template('errors/500.html'), 500
 
 
@@ -2761,60 +2490,36 @@ def handle_exception(e):
 @main.route('/api/activity/user', methods=['GET'])
 @login_required
 def get_user_activity():
-    """Get current user's activity feed"""
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-    
-    activity = Activity.query.filter_by(user_id=current_user.id).order_by(
-        Activity.created_at.desc()
-    ).paginate(page=page, per_page=per_page, error_out=False)
-    
-    return jsonify({
-        'success': True,
-        'activities': [{
-            'id': a.id,
-            'type': a.activity_type,
-            'user_id': a.user_id,
-            'username': a.user.username,
-            'avatar': a.user.avatar,
-            'comic_id': a.comic_id,
-            'comic_title': a.comic.title if a.comic else None,
-            'description': a.description,
-            'created_at': a.created_at.isoformat()
-        } for a in activity.items],
-        'total': activity.total,
-        'pages': activity.pages,
-        'current_page': page
-    })
+    """Get the current user's activity feed."""
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = max(1, min(100, request.args.get('per_page', 20, type=int)))
+    activity = Activity.query.filter(Activity.user_id == current_user.id,
+        db.or_(Activity.comic_id.is_(None), Activity.comic.has(visible_comic_filter())),
+        db.or_(Activity.chapter_id.is_(None), Activity.chapter.has(Chapter.comic.has(visible_comic_filter())))
+    ).order_by(Activity.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify(success=True, activities=[serialize_activity(item) for item in activity.items], total=activity.total, pages=activity.pages, current_page=page)
 
 
 @main.route('/api/activity/global', methods=['GET'])
 def get_global_activity():
-    """Get global public activity feed"""
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-    
-    activity = Activity.query.order_by(
-        Activity.created_at.desc()
-    ).paginate(page=page, per_page=per_page, error_out=False)
-    
-    return jsonify({
-        'success': True,
-        'activities': [{
-            'id': a.id,
-            'type': a.activity_type,
-            'user_id': a.user_id,
-            'username': a.user.username,
-            'avatar': a.user.avatar,
-            'comic_id': a.comic_id,
-            'comic_title': a.comic.title if a.comic else None,
-            'description': a.description,
-            'created_at': a.created_at.isoformat()
-        } for a in activity.items],
-        'total': activity.total,
-        'pages': activity.pages,
-        'current_page': page
-    })
+    """Get public activity whose associated comics and lists remain public."""
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = max(1, min(100, request.args.get('per_page', 20, type=int)))
+    activity = Activity.query.filter(
+        Activity.is_public.is_(True),
+        db.or_(Activity.comic_id.is_(None), Activity.comic.has(public_comic_filter())),
+        db.or_(Activity.reading_list_id.is_(None), Activity.reading_list.has(ReadingList.is_public.is_(True))),
+        db.or_(Activity.chapter_id.is_(None), Activity.chapter.has(Chapter.comic.has(public_comic_filter())))
+    ).order_by(Activity.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify(success=True, activities=[serialize_activity(item) for item in activity.items], total=activity.total, pages=activity.pages, current_page=page)
+
+
+def serialize_activity(activity):
+    data = activity.to_dict()
+    data.update(type=activity.activity_type, username=activity.user.username, avatar=activity.user.avatar,
+                comic_id=activity.comic_id, comic_title=activity.comic.title if activity.comic else None,
+                description=activity.description)
+    return data
 
 
 # ============================
@@ -2823,35 +2528,34 @@ def get_global_activity():
 
 @main.route('/upload', methods=['GET', 'POST'])
 @login_required
+@limiter.limit('20 per hour', methods=['POST'], key_func=lambda: str(current_user.id) if current_user.is_authenticated else (request.remote_addr or 'unknown'))
 def user_upload():
-    """User upload page for submitting comics"""
+    """Store validated submissions in an administrator-only review directory."""
     if request.method == 'POST':
-        # Handle file upload
-        if 'file' not in request.files:
+        file = request.files.get('file')
+        if not file or not file.filename:
             flash('No file selected', 'error')
-            return redirect(request.url)
-        
-        file = request.files['file']
-        if file.filename == '':
-            flash('No file selected', 'error')
-            return redirect(request.url)
-        
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            upload_folder = current_app.config.get('UPLOAD_FOLDER', 'static/uploads')
-            user_upload_dir = os.path.join(upload_folder, 'user_submissions')
-            os.makedirs(user_upload_dir, exist_ok=True)
-            
-            unique_filename = f"{uuid.uuid4().hex}_{filename}"
-            filepath = os.path.join(user_upload_dir, unique_filename)
-            file.save(filepath)
-            
-            flash('File uploaded successfully! It will be reviewed by an admin.', 'success')
             return redirect(url_for('main.user_upload'))
-        else:
-            flash('Invalid file type. Allowed: png, jpg, jpeg, gif, webp, pdf', 'error')
-            return redirect(request.url)
-    
+        try:
+            data = validate_upload(read_limited(file), file.filename)
+        except ValueError as error:
+            abort(400, description=str(error))
+        directory = os.path.join(current_app.config['UPLOAD_FOLDER'], 'user_submissions')
+        os.makedirs(directory, exist_ok=True)
+        prefix = f'{current_user.id}_'
+        current_size = sum(os.path.getsize(os.path.join(directory, name)) for name in os.listdir(directory)
+                           if name.startswith(prefix) and is_safe_path(directory, os.path.join(directory, name)) and os.path.isfile(os.path.join(directory, name)))
+        if current_size + len(data) > 100 * 1024 * 1024:
+            abort(413, description='The pending submission quota has been reached')
+        from security_utils import safe_join_path
+        name = f'{prefix}{uuid.uuid4().hex}_{secure_filename(file.filename)}'
+        path = safe_join_path(directory, name)
+        if not path:
+            abort(400, description='Invalid filename')
+        with open(path, 'xb') as target:
+            target.write(data)
+        flash('File uploaded successfully! It will be reviewed by an admin.', 'success')
+        return redirect(url_for('main.user_upload'))
     return render_template('user/upload.html')
 
 
@@ -2861,6 +2565,8 @@ def user_upload():
 
 @main.app_errorhandler(404)
 def page_not_found(e):
+    if wants_json_response():
+        return jsonify(success=False, message='Not found'), 404
     return render_template('errors/404.html'), 404
 
 @main.app_errorhandler(500)

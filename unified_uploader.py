@@ -23,10 +23,13 @@ from werkzeug.utils import secure_filename
 from PIL import Image
 import io
 import uuid
+from network_utils import safe_request, download_remote_file
+from security_utils import is_safe_path, safe_join_path, sanitize_plain_text
+from upload_utils import read_limited, validate_pdf, render_pdf_page, MAX_PDF_PAGES
 
 # Try to import PyMuPDF for PDF processing
 try:
-    import fitz  # PyMuPDF
+    import pymupdf as fitz
     PYMUPDF_AVAILABLE = True
 except ImportError:
     PYMUPDF_AVAILABLE = False
@@ -128,21 +131,14 @@ class UnifiedUploader:
         }
         
         try:
-            # Step 1: Validate file
-            if not self._validate_file(filename, file_stream):
-                result['errors'].append('Invalid file type or size')
-                return result
-            
-            # Read file bytes into memory
-            if hasattr(file_stream, 'read'):
-                if hasattr(file_stream, 'seek'):
-                    file_stream.seek(0)
-                pdf_bytes = file_stream.read()
-            else:
-                pdf_bytes = bytes(file_stream)
-                
-            if not pdf_bytes:
-                result['errors'].append('Uploaded file is empty')
+            # Validate actual bytes before saving, rendering, or contacting any host.
+            try:
+                pdf_bytes = read_limited(file_stream, self.max_file_size)
+                if not self._validate_file(filename, pdf_bytes):
+                    raise ValueError('A valid, unencrypted PDF within the size and page limits is required')
+            except ValueError as error:
+                result['validation_error'] = True
+                result['errors'].append(str(error))
                 return result
 
             # Check if direct cloud upload to Catbox is enabled
@@ -171,13 +167,13 @@ class UnifiedUploader:
                         if len(doc) > 0:
                             # Render cover
                             mat = fitz.Matrix(1.5, 1.5)
-                            cover_pix = doc[0].get_pixmap(matrix=mat)
+                            cover_pix = render_pdf_page(doc[0], zoom=1.5)
                             cover_bytes = cover_pix.tobytes("jpeg")
                             sample_bytes_list.append(cover_bytes)
                             
                             # Render up to 2 more sample pages for vision LLM context
                             for i in range(1, min(3, len(doc))):
-                                pix = doc[i].get_pixmap(matrix=mat)
+                                pix = render_pdf_page(doc[i], zoom=1.5)
                                 sample_bytes_list.append(pix.tobytes("jpeg"))
                         doc.close()
                     except Exception as e:
@@ -272,78 +268,47 @@ class UnifiedUploader:
         return result
     
     def _validate_file(self, filename: str, file_stream) -> bool:
-        """Validate file extension and size."""
-        # Check extension
-        ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-        if ext not in self.allowed_extensions:
+        """Check content and limits even for raw bytes and non-seekable streams."""
+        if not isinstance(filename, str) or not filename.lower().endswith('.pdf'):
             return False
-        
-        # Check size (if stream supports seeking)
         try:
-            if hasattr(file_stream, 'seek') and hasattr(file_stream, 'tell'):
-                file_stream.seek(0, 2)  # Seek to end
-                size = file_stream.tell()
-                file_stream.seek(0)  # Reset to beginning
-                if size > self.max_file_size:
-                    return False
-        except:
-            pass  # If we can't check size, continue anyway
-        
-        return True
+            validate_pdf(read_limited(file_stream, self.max_file_size))
+            return True
+        except (ValueError, OSError):
+            return False
     
     def _save_locally(self, file_stream, filename: str) -> Optional[str]:
-        """Save file to local storage."""
+        """Save a validated PDF under an unpredictable, non-overwriting name."""
         try:
-            # Generate unique filename (use shorter prefix to avoid API issues with long names)
-            safe_filename = secure_filename(filename)
-            unique_name = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
-            filepath = os.path.join(self.upload_folder, unique_name)
-            
-            # Save file
-            if hasattr(file_stream, 'read'):
-                with open(filepath, 'wb') as f:
-                    shutil.copyfileobj(file_stream, f)
-            else:
-                # Assume it's bytes
-                with open(filepath, 'wb') as f:
-                    f.write(file_stream)
-            
-            return filepath
-        except Exception as e:
-            print(f"Error saving file: {e}")
+            base = secure_filename(os.path.splitext(filename)[0])[:150] or 'comic'
+            path = safe_join_path(self.upload_folder, f'{uuid.uuid4().hex}_{base}.pdf')
+            if not path:
+                return None
+            with open(path, 'xb') as target:
+                target.write(read_limited(file_stream, self.max_file_size))
+            return path
+        except (ValueError, OSError):
             return None
     
     def _extract_sample_pages(self, pdf_path: str, count: int = 3) -> List[str]:
-        """Extract first few pages for AI context. Returns list of paths."""
-        if not PYMUPDF_AVAILABLE:
-            return []
-        
-        extracted_paths = []
+        """Render bounded sample images and always close the PDF."""
+        paths = []
         try:
-            doc = fitz.open(pdf_path)
-            if len(doc) == 0:
+            if not is_safe_path(self.upload_folder, pdf_path):
                 return []
-            
-            base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-            
-            for i in range(min(count, len(doc))):
-                page = doc[i]
-                mat = fitz.Matrix(1.5, 1.5) # Slightly lower res for AI speed
-                pix = page.get_pixmap(matrix=mat)
-                img_data = pix.tobytes("png")
-                img = Image.open(io.BytesIO(img_data))
-                
-                page_filename = f"{base_name}_p{i}.png"
-                page_path = os.path.join(self.covers_folder, page_filename)
-                img.save(page_path, 'PNG')
-                extracted_paths.append(page_path)
-            
-            doc.close()
-            return extracted_paths
-            
-        except Exception as e:
-            print(f"Error extracting sample pages: {e}")
-            return extracted_paths
+            with fitz.open(pdf_path) as document:
+                if not 1 <= document.page_count <= MAX_PDF_PAGES:
+                    return []
+                base = os.path.splitext(os.path.basename(pdf_path))[0]
+                for index in range(min(count, document.page_count)):
+                    path = safe_join_path(self.covers_folder, f'{base}_p{index}.png')
+                    if not path:
+                        return []
+                    render_pdf_page(document[index], zoom=1.5).save(path)
+                    paths.append(path)
+        except (ValueError, RuntimeError, OSError):
+            return []
+        return paths
 
     
     def _analyze_with_vision_llm(self, image_inputs: Union[str, bytes, io.BytesIO, List[Any]]) -> Optional[Dict]:
@@ -448,7 +413,8 @@ Return the result as a JSON object with these exact keys:
             
             # Make API call with longer timeout for local LLMs
             timeout = 120 if self.use_local_llm else 60
-            response = requests.post(api_url, headers=headers, json=payload, timeout=timeout)
+            response = safe_request('POST', api_url, headers=headers, json=payload, timeout=timeout,
+                                    allow_local=self.use_local_llm, require_https=bool(self.ai_api_key) and not self.use_local_llm)
             response.raise_for_status()
             
             result = response.json()
@@ -471,7 +437,7 @@ Return the result as a JSON object with these exact keys:
                 content = result.get('content') or result.get('response') or ""
             
             if not content:
-                print(f"Warning: Could not find content in LLM response: {result}")
+                print("Warning: The LLM did not return metadata text")
                 return None
                 
             # Extract JSON from response
@@ -482,199 +448,131 @@ Return the result as a JSON object with these exact keys:
             return None
     
     def _parse_llm_response(self, content: str) -> Optional[Dict]:
-        """Parse JSON from LLM response."""
-        try:
-            # Try direct JSON parsing
-            return json.loads(content)
-        except json.JSONDecodeError:
-            # Try to extract JSON from markdown code blocks
-            json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
-            if json_match:
-                try:
-                    return json.loads(json_match.group(1).strip())
-                except json.JSONDecodeError:
-                    pass
-            
-            # Try to extract JSON from plain text
-            json_match = re.search(r'\{[^}]*"title"[^}]*\}', content, re.DOTALL)
-            if json_match:
-                try:
-                    return json.loads(json_match.group(0))
-                except json.JSONDecodeError:
-                    pass
-            
+        """Accept a bounded metadata object, never arbitrary model output types."""
+        if not isinstance(content, str) or len(content) > 65536:
             return None
+        candidates = [content]
+        match = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+        if match:
+            candidates.append(match.group(1))
+        if '{' in content:
+            candidates.append(content[content.index('{'):])
+        parsed = None
+        for candidate in candidates:
+            try:
+                value, _ = json.JSONDecoder().raw_decode(candidate.strip())
+                if isinstance(value, dict):
+                    parsed = value
+                    break
+            except (ValueError, TypeError):
+                pass
+        if parsed is None:
+            return None
+        limits = {'title': 200, 'author': 100, 'artist': 100, 'description': 10000, 'category': 50, 'language': 50}
+        metadata = {key: sanitize_plain_text(parsed[key], limit) for key, limit in limits.items() if isinstance(parsed.get(key), str)}
+        tags = parsed.get('tags')
+        metadata['tags'] = list(dict.fromkeys(sanitize_plain_text(tag, 50) for tag in tags[:20] if isinstance(tag, str) and tag.strip())) if isinstance(tags, list) else []
+        episode = parsed.get('episode')
+        if type(episode) is int and 0 <= episode <= 1000000:
+            metadata['episode'] = episode
+        elif isinstance(episode, str) and episode.isascii() and episode.isdecimal() and len(episode) <= 7:
+            metadata['episode'] = int(episode)
+        else:
+            metadata['episode'] = None
+        return metadata
     
     def _upload_to_upfiles(self, file_input: Union[str, bytes], filename: Optional[str] = None) -> Dict:
-        """Upload file to upfiles.com (supports path, URL, or raw bytes)."""
+        """Upload only validated PDFs using bounded, vetted network requests."""
         if not self.upfiles_api_key:
-            return {'success': False, 'message': 'No upfiles API key configured'}
-        
-        max_retries = 3
-        retry_delay = 2 # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                if isinstance(file_input, str):
-                    if file_input.startswith(('http://', 'https://')):
-                        from security_utils import is_safe_url
-                        if not is_safe_url(file_input):
-                            return {'success': False, 'message': 'Invalid or restricted remote URL'}
-                        from catbox_service import get_catbox_session
-                        session = get_catbox_session()
-                        resp = session.get(file_input, timeout=120)
-                        if resp.status_code == 200 and resp.content:
-                            file_bytes = resp.content
-                            fname = filename or os.path.basename(file_input.split('?')[0])
-                        else:
-                            return {'success': False, 'message': f'Failed to download file from URL ({resp.status_code})'}
-                    else:
-                        fname = filename or os.path.basename(file_input)
-                        with open(file_input, 'rb') as f:
-                            file_bytes = f.read()
+            return {'success': False, 'message': 'No UpFiles API key configured'}
+        try:
+            if isinstance(file_input, str):
+                if file_input.startswith(('http://', 'https://')):
+                    data = download_remote_file(file_input, max_bytes=self.max_file_size)
+                    name = filename or os.path.basename(file_input.split('?')[0])
                 else:
-                    file_bytes = file_input
-                    fname = filename or "comic.pdf"
-                
-                if not fname.lower().endswith('.pdf'):
-                    fname += '.pdf'
-                
-                data = {'token': self.upfiles_api_key}
-                files = {
-                    'file': (fname, file_bytes, 'application/pdf')
-                }
-                
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-                }
-                
-                response = requests.post(
-                    self.upfiles_endpoint,
-                    data=data,
-                    files=files,
-                    headers=headers,
-                    timeout=300
-                )
-                response.raise_for_status()
-                
-                result = response.json()
-                
-                if result.get('status') == 'success':
-                    return {
-                        'success': True,
-                        'url': result.get('url'),
-                        'file_id': result.get('file_id')
-                    }
-                else:
-                    # API error, don't necessarily retry unless it's a network thing
-                    return {
-                        'success': False,
-                        'message': result.get('message', 'Unknown error from upfiles')
-                    }
-                        
-            except (requests.exceptions.RequestException, ConnectionResetError) as e:
-                if attempt < max_retries - 1:
-                    import time
-                    time.sleep(retry_delay)
-                    continue
-                return {'success': False, 'message': f'Upload failed after {max_retries} attempts: {str(e)}'}
-            except Exception as e:
-                return {'success': False, 'message': f'Error: {str(e)}'}
-        
-        return {'success': False, 'message': 'Maximum retries exceeded'}
+                    path = file_input if os.path.isabs(file_input) else safe_join_path(self.upload_folder, file_input)
+                    if not path or not is_safe_path(self.upload_folder, path):
+                        raise ValueError('Invalid local comic path')
+                    with open(path, 'rb') as source:
+                        data = read_limited(source, self.max_file_size)
+                    name = filename or os.path.basename(path)
+            else:
+                data = read_limited(file_input, self.max_file_size)
+                name = filename or 'comic.pdf'
+            validate_pdf(data)
+            name = secure_filename(name)[:180] or 'comic.pdf'
+            if not name.lower().endswith('.pdf'):
+                name += '.pdf'
+            response = safe_request('POST', self.upfiles_endpoint,
+                data={'token': self.upfiles_api_key}, files={'file': (name, data, 'application/pdf')},
+                timeout=120, require_https=True)
+            response.raise_for_status()
+            result = response.json()
+            if isinstance(result, dict) and result.get('status') == 'success' and isinstance(result.get('url'), str) and result['url'].startswith(('http://', 'https://')):
+                return {'success': True, 'url': result['url'], 'file_id': result.get('file_id')}
+            return {'success': False, 'message': 'The upload host did not return a file URL'}
+        except ValueError:
+            return {'success': False, 'message': 'Invalid file, destination, or upload response'}
+        except (requests.RequestException, OSError):
+            return {'success': False, 'message': 'The upload host could not be reached'}
 
     def extract_pages(self, pdf_input: Union[str, bytes, io.BytesIO], comic_id: str, upload_to_catbox: bool = False, catbox_userhash: Optional[str] = None) -> List[str]:
-        """
-        Extract all pages of a PDF as images.
-        Supports file path, URL, raw bytes, or BytesIO.
-        If upload_to_catbox is True, streams pages directly to Catbox and returns Catbox URLs without writing local files.
-        """
+        """Extract a complete PDF with bounded download, page count, and pixels."""
+        identifier = str(comic_id)
+        if not identifier.isascii() or not identifier.isdecimal() or len(identifier) > 10 or int(identifier) < 1:
+            return []
         try:
-            import fitz  # PyMuPDF
-            
-            # Open doc from bytes, URL, or local path
-            if isinstance(pdf_input, (bytes, bytearray)):
-                doc = fitz.open(stream=bytes(pdf_input), filetype="pdf")
-            elif hasattr(pdf_input, 'read'):
-                if hasattr(pdf_input, 'seek'):
-                    pdf_input.seek(0)
-                data = pdf_input.read()
-                doc = fitz.open(stream=data, filetype="pdf")
-            elif isinstance(pdf_input, str):
+            if isinstance(pdf_input, str):
                 if pdf_input.startswith(('http://', 'https://')):
-                    from security_utils import is_safe_url
-                    if not is_safe_url(pdf_input):
-                        print(f"[UnifiedUploader] SSRF Guard: Blocked unsafe PDF URL {pdf_input}")
-                        return []
-                    # Download from Catbox / HTTP to memory using pooled session with browser headers & retries
-                    from catbox_service import get_catbox_session
-                    session = get_catbox_session()
-                    doc = None
-                    for attempt in range(1, 4):
-                        try:
-                            resp = session.get(pdf_input, timeout=120)
-                            if resp.status_code == 200 and len(resp.content) > 0:
-                                doc = fitz.open(stream=resp.content, filetype="pdf")
-                                break
-                            else:
-                                print(f"[UnifiedUploader] Download attempt {attempt}/3 returned status {resp.status_code}")
-                        except Exception as e:
-                            print(f"[UnifiedUploader] Download attempt {attempt}/3 failed: {e}")
-                        import time
-                        time.sleep(1.0 * attempt)
-                    if not doc:
-                        print(f"[UnifiedUploader] Failed to fetch and parse PDF from URL: {pdf_input}")
-                        return []
+                    data = download_remote_file(pdf_input, max_bytes=self.max_file_size)
                 else:
-                    doc = fitz.open(pdf_input)
+                    path = pdf_input if os.path.isabs(pdf_input) else safe_join_path(self.upload_folder, pdf_input)
+                    if not path or not is_safe_path(self.upload_folder, path):
+                        return []
+                    with open(path, 'rb') as source:
+                        data = read_limited(source, self.max_file_size)
             else:
-                return []
-            
-            image_urls = []
-            
-            if upload_to_catbox:
-                from catbox_service import CatboxService
-                active_hash = catbox_userhash if catbox_userhash is not None else self.catbox_userhash
-                catbox = CatboxService(userhash=active_hash)
-                
-                for page_num in range(len(doc)):
-                    if page_num > 0:
-                        import time
-                        time.sleep(0.3)  # Gentle pacing to avoid burst rate-limiting on Catbox
-                    page = doc.load_page(page_num)
-                    zoom = 2.0
-                    mat = fitz.Matrix(zoom, zoom)
-                    pix = page.get_pixmap(matrix=mat)
-                    img_bytes = pix.tobytes("jpeg")
-                    
-                    page_filename = f"comic_{comic_id}_page_{page_num + 1:03d}.jpg"
-                    page_url = catbox.upload_file(img_bytes, filename=page_filename)
-                    if page_url:
-                        image_urls.append(page_url)
-                    else:
-                        print(f"Failed to upload page {page_num + 1} to Catbox")
-            else:
-                base_pages_dir = os.path.join(os.path.dirname(self.covers_folder), 'pages')
-                comic_pages_dir = os.path.join(base_pages_dir, str(comic_id))
-                os.makedirs(comic_pages_dir, exist_ok=True)
-                
-                for page_num in range(len(doc)):
-                    page = doc.load_page(page_num)
-                    zoom = 2.0
-                    mat = fitz.Matrix(zoom, zoom)
-                    pix = page.get_pixmap(matrix=mat)
-                    
-                    image_name = f"page_{page_num + 1:03d}.jpg"
-                    image_path = os.path.join(comic_pages_dir, image_name)
-                    pix.save(image_path)
-                    
-                    rel_url = f"/static/uploads/pages/{comic_id}/{image_name}"
-                    image_urls.append(rel_url)
-            
-            doc.close()
-            return image_urls
-        except Exception as e:
-            print(f"Extraction error: {str(e)}")
+                data = read_limited(pdf_input, self.max_file_size)
+            validate_pdf(data)
+            urls = []
+            with fitz.open(stream=data, filetype='pdf') as document:
+                if upload_to_catbox:
+                    from catbox_service import CatboxService
+                    catbox = CatboxService(userhash=catbox_userhash if catbox_userhash is not None else self.catbox_userhash)
+                    for index in range(document.page_count):
+                        image = render_pdf_page(document[index]).tobytes('jpeg')
+                        url = catbox.upload_file(image, filename=f'comic_{identifier}_page_{index + 1:03d}.jpg')
+                        if not url:
+                            return []  # Never persist a shifted or incomplete page sequence.
+                        urls.append(url)
+                else:
+                    base_dir = os.path.join(os.path.dirname(self.covers_folder), 'pages')
+                    target_dir = os.path.join(base_dir, identifier)
+                    if not is_safe_path(base_dir, target_dir):
+                        return []
+                    os.makedirs(base_dir, exist_ok=True)
+                    os.makedirs(target_dir, exist_ok=True)
+                    marker = os.path.join(target_dir, '.complete')
+                    if os.path.exists(marker):
+                        os.remove(marker)
+                    # Publish pages only after every page has rendered successfully.
+                    with tempfile.TemporaryDirectory(prefix=f'comic_{identifier}_', dir=base_dir) as staging:
+                        names = []
+                        for index in range(document.page_count):
+                            name = f'page_{index + 1:03d}.jpg'
+                            render_pdf_page(document[index]).save(os.path.join(staging, name))
+                            names.append(name)
+                        for name in names:
+                            target = safe_join_path(target_dir, name)
+                            if not target:
+                                return []
+                            os.replace(os.path.join(staging, name), target)
+                            urls.append(f'/static/uploads/pages/{identifier}/{name}')
+                    with open(marker, 'w', encoding='ascii') as handle:
+                        handle.write(str(document.page_count))
+            return urls
+        except (ValueError, RuntimeError, OSError, requests.RequestException):
             return []
 
 

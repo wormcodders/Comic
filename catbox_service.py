@@ -13,6 +13,9 @@ import mimetypes
 from typing import Optional, Tuple, Union, List
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from urllib.parse import urlsplit
+from network_utils import safe_request
+from upload_utils import read_limited
 
 CATBOX_API_URL = "https://catbox.moe/user/api.php"
 BROWSER_USER_AGENT = (
@@ -41,6 +44,21 @@ def get_catbox_session() -> requests.Session:
     return _session
 
 
+def cloud_file_name(value):
+    """Extract only valid Catbox filenames, ignoring empty or foreign references."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    parsed = urlsplit(value)
+    if parsed.scheme:
+        if parsed.scheme not in ('http', 'https') or parsed.hostname != 'files.catbox.moe':
+            return None
+        value = parsed.path.lstrip('/')
+    if re.fullmatch(r'[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+', value):
+        return value
+    return None
+
+
 def sanitize_cloud_filename(filename: Optional[str], default_ext: str = ".bin") -> str:
     """
     Sanitize filename to ensure safe ASCII characters and a valid extension.
@@ -48,7 +66,8 @@ def sanitize_cloud_filename(filename: Optional[str], default_ext: str = ".bin") 
     """
     if not filename:
         return f"file{default_ext}"
-    name, ext = os.path.splitext(filename)
+    name, ext = os.path.splitext(os.path.basename(filename))
+    name = name[:150]
     clean_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', name).strip('_')
     if not clean_name:
         clean_name = "file"
@@ -99,13 +118,22 @@ class CatboxService:
                 return None
             raw_filename = filename or os.path.basename(file_input)
             with open(file_input, "rb") as f:
-                file_bytes = f.read()
+                try:
+                    file_bytes = read_limited(f)
+                except ValueError:
+                    return None
         elif isinstance(file_input, (bytes, bytearray)):
-            file_bytes = bytes(file_input)
+            try:
+                file_bytes = read_limited(file_input)
+            except ValueError:
+                return None
         elif hasattr(file_input, "read"):
             if hasattr(file_input, "seek"):
                 file_input.seek(0)
-            file_bytes = file_input.read()
+            try:
+                file_bytes = read_limited(file_input)
+            except ValueError:
+                return None
             if hasattr(file_input, "seek"):
                 file_input.seek(0)
         else:
@@ -123,7 +151,6 @@ class CatboxService:
         if not mime_type:
             mime_type = "application/octet-stream"
 
-        session = get_catbox_session()
 
         for attempt in range(1, max_retries + 1):
             data = {"reqtype": "fileupload"}
@@ -135,18 +162,18 @@ class CatboxService:
             }
 
             try:
-                response = session.post(
+                response = safe_request('POST',
                     self.api_url,
                     data=data,
                     files=files,
-                    timeout=120
+                    timeout=60, require_https=True
                 )
 
                 response_text = response.text.strip() if response.text else ""
 
                 # Check if Catbox returned a valid file URL
-                url_match = re.search(r'https?://files\.catbox\.moe/[a-zA-Z0-9_\-\.]+', response_text)
-                if url_match:
+                url_match = re.fullmatch(r'https?://files\.catbox\.moe/[a-zA-Z0-9_\-\.]+', response_text)
+                if 200 <= response.status_code < 300 and url_match:
                     url = url_match.group(0)
                     if url.startswith("http://"):
                         url = "https://" + url[7:]
@@ -163,7 +190,7 @@ class CatboxService:
                     f"with unexpected body: {repr(response_text[:100])}. Retrying in {attempt * 1.5:.1f}s..."
                 )
 
-            except (requests.exceptions.RequestException, ConnectionResetError) as e:
+            except (requests.exceptions.RequestException, ConnectionResetError, ValueError) as e:
                 print(
                     f"[CatboxService] Warning: Attempt {attempt}/{max_retries} failed with error: {e}. "
                     f"Retrying in {attempt * 1.5:.1f}s..."
@@ -200,7 +227,7 @@ class CatboxService:
         # Extract only basenames (e.g. 'https://files.catbox.moe/abc123.jpg' -> 'abc123.jpg')
         cleaned_filenames = []
         for f in file_list:
-            cleaned = os.path.basename(f.strip())
+            cleaned = cloud_file_name(f)
             if cleaned:
                 cleaned_filenames.append(cleaned)
 
@@ -214,16 +241,15 @@ class CatboxService:
         }
 
         try:
-            session = get_catbox_session()
-            response = session.post(
+            response = safe_request('POST',
                 self.api_url,
                 data=data,
-                timeout=30
+                timeout=30, require_https=True
             )
             return response.status_code == 200 and (
                 "Files successfully deleted" in response.text or "success" in response.text.lower()
             )
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.RequestException, ValueError) as e:
             print(f"[CatboxService] Delete error: {e}")
             return False
 
@@ -254,7 +280,7 @@ class CatboxService:
 
         cleaned_filenames = []
         for f in files:
-            cleaned = os.path.basename(f.strip().split('?')[0])
+            cleaned = cloud_file_name(f)
             if cleaned and cleaned not in cleaned_filenames:
                 cleaned_filenames.append(cleaned)
 
@@ -271,12 +297,11 @@ class CatboxService:
         }
 
         try:
-            session = get_catbox_session()
-            response = session.post(self.api_url, data=data, timeout=30)
+            response = safe_request('POST', self.api_url, data=data, timeout=30, require_https=True)
             text = response.text.strip()
 
-            match = re.search(r'https?://catbox\.moe/c/[a-zA-Z0-9]+', text)
-            if match:
+            match = re.fullmatch(r'https?://catbox\.moe/c/[a-zA-Z0-9]+', text)
+            if response.status_code == 200 and match:
                 album_url = match.group(0)
                 if album_url.startswith("http://"):
                     album_url = "https://" + album_url[7:]
@@ -300,7 +325,7 @@ class CatboxService:
             return False
 
         short = os.path.basename(short_or_url.strip().rstrip('/'))
-        cleaned_filenames = [os.path.basename(f.strip().split('?')[0]) for f in files if f.strip()]
+        cleaned_filenames = [name for name in (cloud_file_name(value) for value in files) if name]
         if not cleaned_filenames:
             return False
 
@@ -311,8 +336,7 @@ class CatboxService:
             "files": " ".join(cleaned_filenames)
         }
         try:
-            session = get_catbox_session()
-            response = session.post(self.api_url, data=data, timeout=30)
+            response = safe_request('POST', self.api_url, data=data, timeout=30, require_https=True)
             return response.status_code == 200
         except Exception as e:
             print(f"[CatboxService] Add to album error: {e}")
@@ -331,8 +355,7 @@ class CatboxService:
             "short": short
         }
         try:
-            session = get_catbox_session()
-            response = session.post(self.api_url, data=data, timeout=30)
+            response = safe_request('POST', self.api_url, data=data, timeout=30, require_https=True)
             return response.status_code == 200
         except Exception as e:
             print(f"[CatboxService] Delete album error: {e}")

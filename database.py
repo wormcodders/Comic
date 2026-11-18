@@ -9,6 +9,8 @@ def create_app(config_name='default'):
     """Create Flask app with database"""
     app = Flask(__name__)
     app.config.from_object(config[config_name])
+    from app_setup import configure_security
+    configure_security(app)
     
     # Initialize database
     db.init_app(app)
@@ -60,26 +62,18 @@ def init_default_settings():
             print(f"Initialized setting: {key}")
 
 def create_default_admin():
-    """Create default admin user if none exists"""
-    if not User.query.filter_by(is_admin=True).first():
-        admin = User(
-            username='admin',
-            email='admin@comics.com',
-            is_admin=True
-        )
-        admin.set_password('admin123')  # Change in production
-        db.session.add(admin)
-        db.session.commit()
-        print("Created default admin user: admin/admin123")
+    """Create an administrator only from explicit configuration."""
+    from app_setup import create_configured_admin
+    return create_configured_admin()
 
 def create_upload_directories():
     """Create necessary upload directories"""
-    from config import Config
+    from flask import current_app
     
     directories = [
-        Config.UPLOAD_FOLDER,
-        Config.COMIC_UPLOAD_FOLDER,
-        Config.COVER_UPLOAD_FOLDER
+        current_app.config['UPLOAD_FOLDER'],
+        current_app.config['COMIC_UPLOAD_FOLDER'],
+        current_app.config['COVER_UPLOAD_FOLDER']
     ]
     
     for directory in directories:

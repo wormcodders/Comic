@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <script src="{{ url_for('static', filename='js/csrf.js') }}" defer></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
@@ -117,7 +119,7 @@
                                     <li><a class="dropdown-item glass-dropdown-item" href="{{ url_for('main.admin_dashboard') }}">Admin</a></li>
                                 {% endif %}
                                 <li><div class="glass-divider"></div></li>
-                                <li><a class="dropdown-item text-danger" href="{{ url_for('main.logout') }}">Logout</a></li>
+                                <li><form method="post" action="{{ url_for('main.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="dropdown-item text-danger">Logout</button></form></li>
                             </ul>
                         </li>
                     {% else %}

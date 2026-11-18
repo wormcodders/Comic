@@ -9,11 +9,11 @@
 
 {% block og_title %}{{ comic.title }} - ComicVault{% endblock %}
 {% block og_description %}{{ comic.description[:200] if comic.description else "Read " + (comic.title or "this comic") + " online for free on ComicVault." }}{% endblock %}
-{% block og_image %}{{ url_for('static', filename='uploads/covers/' + comic.cover_image, _external=True) if comic.cover_image else url_for('static', filename='images/og-image.jpg', _external=True) }}{% endblock %}
+{% block og_image %}{{ comic.cover_url }}{% endblock %}
 
 {% block twitter_title %}{{ comic.title }} - ComicVault{% endblock %}
 {% block twitter_description %}{{ comic.description[:200] if comic.description else "Read " + (comic.title or "this comic") + " online for free on ComicVault." }}{% endblock %}
-{% block twitter_image %}{{ url_for('static', filename='uploads/covers/' + comic.cover_image, _external=True) if comic.cover_image else url_for('static', filename='images/og-image.jpg', _external=True) }}{% endblock %}
+{% block twitter_image %}{{ comic.cover_url }}{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -309,40 +309,21 @@
 {% block content %}
 
 <!-- Comic Structured Data for SEO -->
-<script type="application/ld+json">
-{
+{% set book_data = {
     "@context": "https://schema.org",
     "@type": "Book",
-    "name": "{{ comic.title }}",
-    "author": {
-        "@type": "Person",
-        "name": "{{ comic.author }}"
-    },
-    {% if comic.artist %}
-    "illustrator": {
-        "@type": "Person",
-        "name": "{{ comic.artist }}"
-    },
-    {% endif %}
-    "description": "{{ comic.description|replace('"', '\\"') if comic.description else 'Read ' + comic.title + ' online for free' }}",
-    "image": "{{ url_for('static', filename='uploads/covers/' + comic.cover_image, _external=True) if comic.cover_image else url_for('static', filename='images/og-image.jpg', _external=True) }}",
-    "url": "{{ request.url }}",
-    "aggregateRating": {
-        "@type": "AggregateRating",
-        "ratingValue": "{{ comic.average_rating or 0 }}",
-        "reviewCount": "{{ comic.ratings.count() }}"
-    },
-    {% if comic.tags %}
-    "genre": [
-        {% for tag in comic.tags %}
-        "{{ tag.tag }}"{% if not loop.last %},{% endif %}
-        {% endfor %}
-    ],
-    {% endif %}
+    "name": comic.title,
+    "author": {"@type": "Person", "name": comic.author or "Unknown"},
+    "description": comic.description or ("Read " + comic.title + " online for free"),
+    "image": comic.cover_url,
+    "url": request.base_url,
+    "aggregateRating": {"@type": "AggregateRating", "ratingValue": comic.average_rating or 0, "reviewCount": comic.ratings.count()},
+    "genre": comic.tags|map(attribute='tag')|list,
     "isAccessibleForFree": true,
     "accessMode": "visual"
-}
-</script>
+} %}
+{% if comic.artist %}{% set unused = book_data.update({"illustrator": {"@type": "Person", "name": comic.artist}}) %}{% endif %}
+<script type="application/ld+json">{{ book_data|tojson }}</script>
 
 <div class="comic-hero">
     <div class="comic-detail-container">
@@ -429,6 +410,8 @@
                 {% if current_user.is_authenticated %}
                     <button class="btn-library {% if in_library %}btn-in-library{% else %}btn-add-library{% endif %}" 
                             onclick="toggleLibrary({{ comic.id }})" data-library-btn
+                            data-comic-id="{{ comic.id }}" data-comic-title="{{ comic.title }}"
+                            aria-pressed="{{ 'true' if in_library else 'false' }}"
                             aria-label="{% if in_library %}Remove {{ comic.title }} from library{% else %}Add {{ comic.title }} to library{% endif %}">
                         {% if in_library %}
                             <i class="fas fa-check" aria-hidden="true"></i> In Library
@@ -542,6 +525,7 @@ async function rateComic(rating) {
                 } else {
                     btn.classList.remove('active');
                 }
+                btn.setAttribute('aria-pressed', String(index < rating));
             });
             
             document.getElementById('avgRating').textContent = data.new_average;

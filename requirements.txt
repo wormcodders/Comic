@@ -1,16 +1,22 @@
-Flask
-Flask-SQLAlchemy
-Flask-Login
-Werkzeug
-Pillow
-PyPDF2
-python-dotenv
-requests
-Flask-WTF
-Flask-Limiter
-Flask-Talisman
-bleach
-flask_migrate
-pymupdf
-cryptography
+# Core Web Framework & Database
+Flask>=3.1.3
+Flask-SQLAlchemy>=3.1.1
+Flask-Migrate>=4.1.0
+Flask-Login>=0.6.3
+Werkzeug>=3.1.9
 
+# Security, Protection & Encryption
+Flask-WTF>=1.3.0
+Flask-Limiter[redis]>=4.1.1
+Flask-Talisman>=1.1.0
+bleach>=6.4.0
+cryptography>=50.0.2
+itsdangerous>=2.2.0
+
+# Media & Document Processing
+Pillow>=13.0.0
+PyMuPDF>=2.0
+
+# Network & Environment
+requests>=2.34.2
+python-dotenv>=1.2.4

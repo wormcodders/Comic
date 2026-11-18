@@ -348,11 +348,11 @@ function testLLMConnection() {
         if (data.success) {
             resultSpan.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Connection successful!</span>';
         } else {
-            resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' + (data.message || 'Connection failed') + '</span>';
+            resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' + escapeHtml(data.message || 'Connection failed') + '</span>';
         }
     })
     .catch(error => {
-        resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ' + error.message + '</span>';
+        resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ' + escapeHtml(error.message) + '</span>';
     });
 }
 
@@ -369,13 +369,13 @@ function testUpfilesConnection() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            resultSpan.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> ' + (data.message || 'Connection successful!') + '</span>';
+            resultSpan.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> ' + escapeHtml(data.message || 'Connection successful!') + '</span>';
         } else {
-            resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' + (data.message || 'Connection failed') + '</span>';
+            resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' + escapeHtml(data.message || 'Connection failed') + '</span>';
         }
     })
     .catch(error => {
-        resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ' + error.message + '</span>';
+        resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ' + escapeHtml(error.message) + '</span>';
     });
 }
 
@@ -397,13 +397,13 @@ function testCatboxConnection() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            resultSpan.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> ' + (data.message || 'Connected successfully!') + '</span>';
+            resultSpan.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> ' + escapeHtml(data.message || 'Connected successfully!') + '</span>';
         } else {
-            resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' + (data.message || 'Connection failed') + '</span>';
+            resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' + escapeHtml(data.message || 'Connection failed') + '</span>';
         }
     })
     .catch(error => {
-        resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ' + error.message + '</span>';
+        resultSpan.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ' + escapeHtml(error.message) + '</span>';
     });
 }
 

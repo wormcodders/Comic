@@ -1,9 +1,14 @@
 import os
 from datetime import timedelta
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 class Config:
     """Base configuration"""
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
+    SECRET_KEY = os.environ.get('SECRET_KEY')
+    CREDENTIAL_ENCRYPTION_KEY = os.environ.get('CREDENTIAL_ENCRYPTION_KEY')
+    ENV_NAME = 'development'
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///comics.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
@@ -20,6 +25,17 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     SESSION_COOKIE_SECURE = False  # Overridden in ProductionConfig
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SAMESITE = 'Lax'
+    REMEMBER_COOKIE_SECURE = False
+    RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI') or 'memory://'
+    REMEMBER_COOKIE_DURATION = timedelta(days=7)
+    MAX_COMIC_PAGES = 500
+
+    # An administrator is bootstrapped only when all three values are supplied.
+    ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME')
+    ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL')
+    ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD')
     
     # Pagination
     COMICS_PER_PAGE = 12
@@ -32,17 +48,24 @@ class Config:
     
 class DevelopmentConfig(Config):
     """Development configuration"""
-    DEBUG = True
+    DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() in ('1', 'true')
     
 class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
+    ENV_NAME = 'production'
     SECRET_KEY = os.environ.get('SECRET_KEY')
-    SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'true').lower() in ('1', 'true')
+    REMEMBER_COOKIE_SECURE = SESSION_COOKIE_SECURE
+    RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI')
     
 class TestingConfig(Config):
     """Testing configuration"""
     TESTING = True
+    ENV_NAME = 'testing'
+    SECRET_KEY = 'isolated-testing-key-never-use-in-production'
+    ADMIN_USERNAME = ADMIN_EMAIL = ADMIN_PASSWORD = None
+    RATELIMIT_ENABLED = False
     WTF_CSRF_ENABLED = False
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
 

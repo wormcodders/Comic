@@ -9,6 +9,7 @@ import hashlib
 import os
 from typing import Optional
 from cryptography.fernet import Fernet
+from cryptography.fernet import InvalidToken
 
 SENSITIVE_KEYS = {
     'llm_api_key',
@@ -24,9 +25,15 @@ def get_cipher() -> Fernet:
     Derive a 32-byte URL-safe base64 key from SECRET_KEY.
     Ensures consistent encryption/decryption tied to the server secret key.
     """
-    from config import Config
-    secret = getattr(Config, 'SECRET_KEY', None) or os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
-    key_bytes = hashlib.sha256(secret.encode('utf-8')).digest()
+    from flask import current_app, has_app_context
+    if has_app_context():
+        secret = current_app.config.get('CREDENTIAL_ENCRYPTION_KEY') or current_app.config.get('SECRET_KEY')
+    else:
+        secret = os.environ.get('CREDENTIAL_ENCRYPTION_KEY') or os.environ.get('SECRET_KEY')
+    if not secret:
+        raise ValueError('A configured encryption key is required')
+    secret_bytes = secret.encode('utf-8') if isinstance(secret, str) else secret
+    key_bytes = hashlib.sha256(secret_bytes).digest()
     fernet_key = base64.urlsafe_b64encode(key_bytes)
     return Fernet(fernet_key)
 
@@ -52,15 +59,14 @@ def encrypt_val(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
     val_str = str(value).strip()
-    if not val_str or val_str.startswith(ENCRYPTION_PREFIX):
+    if not val_str:
         return val_str
-    try:
-        cipher = get_cipher()
-        ciphertext = cipher.encrypt(val_str.encode('utf-8')).decode('utf-8')
-        return f"{ENCRYPTION_PREFIX}{ciphertext}"
-    except Exception as e:
-        print(f"[Crypto] Error encrypting sensitive value: {e}")
+    if val_str.startswith(ENCRYPTION_PREFIX):
+        decrypt_val(val_str)  # Never accept malformed or foreign ciphertext.
         return val_str
+    cipher = get_cipher()
+    ciphertext = cipher.encrypt(val_str.encode('utf-8')).decode('utf-8')
+    return f"{ENCRYPTION_PREFIX}{ciphertext}"
 
 
 def decrypt_val(value: Optional[str]) -> Optional[str]:
@@ -77,6 +83,5 @@ def decrypt_val(value: Optional[str]) -> Optional[str]:
         cipher = get_cipher()
         raw_token = val_str[len(ENCRYPTION_PREFIX):]
         return cipher.decrypt(raw_token.encode('utf-8')).decode('utf-8')
-    except Exception as e:
-        print(f"[Crypto] Error decrypting sensitive value: {e}")
-        return val_str
+    except (InvalidToken, UnicodeError, ValueError) as error:
+        raise ValueError('Unable to decrypt the stored credential; check the configured encryption key.') from error

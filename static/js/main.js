@@ -12,11 +12,16 @@ function showNotification(message, type = 'info', duration = 3000) {
     existingNotifications.forEach(n => n.remove());
     
     const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.innerHTML = `
-        <span class="notification-message">${message}</span>
-        <button class="notification-close" onclick="this.parentElement.remove()">&times;</button>
-    `;
+    const safeType = ['info', 'success', 'warning', 'error', 'danger'].includes(type) ? type : 'info';
+    notification.className = `notification notification-${safeType}`;
+    const messageElement = document.createElement('span');
+    messageElement.className = 'notification-message';
+    messageElement.textContent = String(message);
+    const closeButton = document.createElement('button');
+    closeButton.className = 'notification-close';
+    closeButton.textContent = '\u00d7';
+    closeButton.addEventListener('click', () => notification.remove());
+    notification.append(messageElement, closeButton);
     
     document.body.appendChild(notification);
     setTimeout(() => notification.classList.add('show'), 10);
@@ -292,35 +297,43 @@ observer.observe(document.body, {
 // ============================================
 
 async function toggleLibrary(comicId) {
+    const selector = '[data-comic-id="' + comicId + '"]';
+    const buttons = document.querySelectorAll(selector + '.library-btn, ' + selector + '[data-library-btn]');
+    buttons.forEach(button => { button.disabled = true; });
     try {
         const response = await fetch('/api/toggle_library', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ comic_id: comicId })
         });
-        
         if (response.status === 401) {
             window.location.href = '/login';
             return;
         }
-        
         const data = await response.json();
         if (data.success) {
-            const btn = document.querySelector(`[data-comic-id="${comicId}"].library-btn`);
-            if (btn) {
-                btn.classList.toggle('in-library', data.in_library);
-                const icon = btn.querySelector('i');
-                if (icon) {
-                    icon.className = data.in_library ? 'fas fa-heart' : 'far fa-heart';
+            buttons.forEach(button => {
+                button.classList.toggle('in-library', data.in_library);
+                button.setAttribute('aria-pressed', String(data.in_library));
+                const icon = button.querySelector('i');
+                if (icon) icon.className = data.in_library ? 'fas fa-heart' : 'far fa-heart';
+                if (button.hasAttribute('data-library-btn')) {
+                    button.classList.toggle('btn-in-library', data.in_library);
+                    button.classList.toggle('btn-add-library', !data.in_library);
+                    button.innerHTML = data.in_library ? '<i class="fas fa-check"></i> In Library' : '<i class="far fa-bookmark"></i> Add to Library';
+                    const title = button.dataset.comicTitle || 'comic';
+                    button.setAttribute('aria-label', data.in_library ? 'Remove ' + title + ' from library' : 'Add ' + title + ' to library');
                 }
-            }
-            showNotification(data.message, 'success');
+            });
+            showNotification(data.message || 'Library updated', 'success');
         } else {
-            showNotification(data.error || 'Error updating library', 'error');
+            showNotification(data.error || data.message || 'Error updating library', 'error');
         }
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Library update failed:', error);
         showNotification('An error occurred', 'error');
+    } finally {
+        buttons.forEach(button => { button.disabled = false; });
     }
 }
 
@@ -340,9 +353,9 @@ async function submitRating(comicId, score) {
         if (data.success) {
             showNotification('Rating saved!', 'success');
             // Update UI if elements exist
-            const avgEl = document.querySelector('.average-rating');
+            const avgEl = document.querySelector('.average-rating, #avgRating');
             if (avgEl) avgEl.textContent = data.new_average;
-            const countEl = document.querySelector('.rating-count');
+            const countEl = document.querySelector('.rating-count, #totalRatings');
             if (countEl) countEl.textContent = `(${data.total_ratings} ratings)`;
         } else {
             showNotification(data.error || 'Error saving rating', 'error');
@@ -361,9 +374,9 @@ async function submitRating(comicId, score) {
 function enhanceAccessibility() {
     // Add aria-label to comic cards
     document.querySelectorAll('.comic-card').forEach(card => {
-        const title = card.querySelector('.comic-title')?.textContent || '';
-        const author = card.querySelector('.comic-author')?.textContent || '';
-        if (!card.getAttribute('aria-label')) {
+        const title = card.querySelector('.comic-title, .comic-card-title')?.textContent.trim() || '';
+        const author = card.querySelector('.comic-author, .comic-card-author')?.textContent.trim() || '';
+        if (title && (!card.getAttribute('aria-label') || card.getAttribute('aria-label').trim() === 'by')) {
             card.setAttribute('aria-label', `${title} by ${author}`);
         }
     });
@@ -531,9 +544,9 @@ function renderSearchHistory(containerId, onSelect) {
 }
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return String(text ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[character]);
 }
 
 // Export to window
@@ -639,3 +652,17 @@ window.initBlurUpLoading = initBlurUpLoading;
 window.createSkeletonCard = createSkeletonCard;
 window.showSkeletonLoading = showSkeletonLoading;
 window.hideSkeletonLoading = hideSkeletonLoading;
+
+
+// Capture these functions before page-specific wrappers redefine global names.
+window.ComicVault = Object.assign(window.ComicVault || {}, {
+    toggleLibrary,
+    submitRating,
+    saveReadingProgress,
+    showNotification,
+    showToast: showNotification,
+    getSearchHistory,
+    addToSearchHistory,
+    clearSearchHistory,
+    renderSearchHistory
+});

@@ -5,12 +5,12 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     FLASK_APP=main.py \
-    FLASK_ENV=production
+    APP_ENV=production
 
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies (needed for packages like Pillow, PyPDF2, etc.)
+# Install system dependencies for database drivers and media libraries.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -18,18 +18,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements and install dependencies
 COPY requirements.txt /app/
-RUN pip install --upgrade pip && \
+RUN pip install --upgrade 'pip>=26.2' && \
     pip install -r requirements.txt gunicorn
 
 # Copy the rest of the application
-COPY . /app/
+COPY --chown=10001:10001 . /app/
 
 # Create necessary directories for volumes (ensure they have correct permissions)
-RUN mkdir -p /app/instance /app/static/uploads/comics /app/static/uploads/covers && \
-    chmod -R 777 /app/instance /app/static/uploads
+RUN useradd --uid 10001 --create-home app && \
+    mkdir -p /app/instance /app/static/uploads/comics /app/static/uploads/covers && \
+    chown -R app:app /app/instance /app/static/uploads && \
+    chmod 700 /app/instance && chmod -R 750 /app/static/uploads
+
+USER app
 
 # Expose port 5000
 EXPOSE 5000
 
 # Start Gunicorn (using main.py's create_app by default)
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "3", "--timeout", "120", "main:create_app()"]

@@ -525,7 +525,7 @@
                             <div class="tag-suggestions">
                                 <span style="color: #666; font-size: 0.8rem; margin-right: 0.5rem;">Popular:</span>
                                 {% for tag in popular_tags[:10] %}
-                                <span class="tag-suggestion" onclick="addTag('{{ tag }}')">{{ tag }}</span>
+                                <span class="tag-suggestion" data-tag="{{ tag }}" onclick="addTag(this.dataset.tag)">{{ tag }}</span>
                                 {% endfor %}
                             </div>
                             {% endif %}

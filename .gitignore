@@ -41,6 +41,7 @@ instance/
 static/uploads/comics/*
 static/uploads/covers/*
 static/uploads/pages/*
+static/uploads/user_submissions/
 !static/uploads/comics/.gitkeep
 !static/uploads/covers/.gitkeep
 !static/uploads/pages/.gitkeep

@@ -1,9 +1,19 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
-from datetime import datetime
+from datetime import datetime, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
+import hashlib
 
 db = SQLAlchemy()
+
+
+def utc_isoformat(value):
+    """Serialize database timestamps with an explicit UTC offset for browsers."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
 
 class User(UserMixin, db.Model):
     """User model for authentication and profiles"""
@@ -17,8 +27,13 @@ class User(UserMixin, db.Model):
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    reading_progress = db.relationship('ReadingProgress', backref='user', lazy='dynamic')
-    ratings = db.relationship('Rating', backref='user', lazy='dynamic')
+    reading_progress = db.relationship('ReadingProgress', backref='user', lazy='dynamic', cascade='all, delete-orphan')
+    ratings = db.relationship('Rating', backref='user', lazy='dynamic', cascade='all, delete-orphan')
+
+    def get_id(self):
+        """Invalidate both sessions and remember cookies whenever the password changes."""
+        signature = hashlib.sha256((self.password_hash or '').encode('utf-8')).hexdigest()
+        return f'{self.id}:{signature}'
     
     def set_password(self, password):
         """Hash and set user password"""
@@ -26,7 +41,12 @@ class User(UserMixin, db.Model):
     
     def check_password(self, password):
         """Check password against hash"""
-        return check_password_hash(self.password_hash, password)
+        if not self.password_hash or not isinstance(password, str) or not password:
+            return False
+        try:
+            return check_password_hash(self.password_hash, password)
+        except (ValueError, TypeError):
+            return False
     
     def set_security_answer(self, answer):
         """Normalize and hash security answer using scrypt"""
@@ -46,7 +66,7 @@ class User(UserMixin, db.Model):
     @property
     def avatar(self):
         """Default user avatar path"""
-        return 'default-avatar.png'
+        return '/static/images/default-avatar.svg'
     
     def __repr__(self):
         return f'<User {self.username}>'
@@ -111,6 +131,13 @@ class Comic(db.Model):
     pages = db.relationship('ComicPage', backref='comic', lazy='dynamic', cascade='all, delete-orphan', order_by='ComicPage.page_number')
     ratings = db.relationship('Rating', backref='comic', lazy='dynamic', cascade='all, delete-orphan')
     reading_progress = db.relationship('ReadingProgress', backref='comic', lazy='dynamic', cascade='all, delete-orphan')
+    uploader = db.relationship('User', backref=db.backref('uploaded_comics', lazy=True))
+
+    def can_view(self, user):
+        """Apply the same privacy rule to pages, APIs, files, and related content."""
+        if self.visibility == 'public' and self.is_published:
+            return True
+        return bool(user and user.is_authenticated and (user.is_admin or self.uploader_id == user.id))
     
     @property
     def cover_url(self):
@@ -120,7 +147,7 @@ class Comic(db.Model):
                 return self.cover_image
             return f'/static/uploads/covers/{self.cover_image}'
         # Return a high-quality placeholder if no cover exists
-        return 'https://via.placeholder.com/300x450.png?text=No+Cover'
+        return '/static/images/default-cover.svg'
 
     @property
     def pdf_url(self):
@@ -161,7 +188,7 @@ class Comic(db.Model):
             'visibility': self.visibility,
             'average_rating': self.average_rating,
             'view_count': self.view_count,
-            'created_at': self.created_at.isoformat()
+            'created_at': utc_isoformat(self.created_at)
         }
 
 
@@ -248,7 +275,12 @@ class Setting(db.Model):
         """Return the decrypted plaintext value if sensitive/encrypted"""
         from crypto_utils import decrypt_val, is_sensitive_key
         if is_sensitive_key(self.key) or (self.value and str(self.value).startswith('enc:')):
-            return decrypt_val(self.value)
+            try:
+                return decrypt_val(self.value)
+            except ValueError:
+                from flask import current_app
+                current_app.logger.warning('Stored credential could not be decrypted: %s', self.key)
+                return None
         return self.value
 
     @staticmethod
@@ -259,7 +291,7 @@ class Setting(db.Model):
         if not setting or setting.value is None:
             return default
         if is_sensitive_key(key) or str(setting.value).startswith('enc:'):
-            return decrypt_val(setting.value)
+            return setting.get_decrypted_value() or default
         return setting.value
     
     @staticmethod
@@ -293,7 +325,7 @@ class UserLibrary(db.Model):
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    user = db.relationship('User', backref=db.backref('library_items', lazy=True))
+    user = db.relationship('User', backref=db.backref('library_items', lazy=True, cascade='all, delete-orphan'))
     comic = db.relationship('Comic', backref=db.backref('library_users', lazy=True, cascade='all, delete-orphan'))
     
     def __repr__(self):
@@ -319,10 +351,10 @@ class Comment(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    user = db.relationship('User', backref=db.backref('comments', lazy=True))
+    user = db.relationship('User', backref=db.backref('comments', lazy=True, cascade='all, delete-orphan'))
     comic = db.relationship('Comic', backref=db.backref('comments', lazy=True, cascade='all, delete-orphan'))
     chapter = db.relationship('Chapter', backref=db.backref('comments', lazy=True))
-    parent = db.relationship('Comment', remote_side=[id], backref=db.backref('replies', lazy=True))
+    parent = db.relationship('Comment', remote_side=[id], backref=db.backref('replies', lazy=True, cascade='all, delete-orphan'))
     likes = db.relationship('CommentLike', backref='comment', lazy=True, cascade='all, delete-orphan')
     
     def __repr__(self):
@@ -342,9 +374,9 @@ class Comment(db.Model):
             'is_spoiler': self.is_spoiler,
             'is_hidden': self.is_hidden,
             'likes_count': self.likes_count,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
-            'replies_count': len(self.replies) if self.replies else 0
+            'created_at': utc_isoformat(self.created_at),
+            'updated_at': utc_isoformat(self.updated_at),
+            'replies_count': sum(not reply.is_hidden for reply in self.replies)
         }
 
 
@@ -354,6 +386,7 @@ class CommentLike(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     comment_id = db.Column(db.Integer, db.ForeignKey('comment.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user = db.relationship('User', backref=db.backref('comment_likes', lazy=True, cascade='all, delete-orphan'))
     
     # Unique constraint to prevent duplicate likes
     __table_args__ = (db.UniqueConstraint('user_id', 'comment_id', name='unique_comment_like'),)
@@ -375,7 +408,7 @@ class ReadingList(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    user = db.relationship('User', backref=db.backref('reading_lists', lazy=True))
+    user = db.relationship('User', backref=db.backref('reading_lists', lazy=True, cascade='all, delete-orphan'))
     items = db.relationship('ReadingListItem', backref='reading_list', lazy=True, cascade='all, delete-orphan')
     
     def __repr__(self):
@@ -397,8 +430,8 @@ class ReadingList(db.Model):
             'is_staff_pick': self.is_staff_pick,
             'likes_count': self.likes_count,
             'items_count': len(self.items) if self.items else 0,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat()
+            'created_at': utc_isoformat(self.created_at),
+            'updated_at': utc_isoformat(self.updated_at)
         }
         if include_items:
             data['items'] = [item.to_dict() for item in self.items]
@@ -453,11 +486,17 @@ class Activity(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('activities', lazy=True))
-    target_user = db.relationship('User', foreign_keys=[target_user_id])
-    comic = db.relationship('Comic', backref=db.backref('activities', lazy=True))
-    chapter = db.relationship('Chapter')
-    reading_list = db.relationship('ReadingList')
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('activities', lazy=True, cascade='all, delete-orphan'))
+    target_user = db.relationship('User', foreign_keys=[target_user_id], backref=db.backref('targeted_activities', lazy=True))
+    comic = db.relationship('Comic', backref=db.backref('activities', lazy=True, cascade='all, delete-orphan'))
+    chapter = db.relationship('Chapter', backref=db.backref('activities', lazy=True, cascade='all, delete-orphan'))
+    reading_list = db.relationship('ReadingList', backref=db.backref('activities', lazy=True, cascade='all, delete-orphan'))
+
+    @property
+    def description(self):
+        labels = {'read': 'Read', 'favorite': 'Saved', 'rating': 'Rated', 'comment': 'Commented on', 'list_create': 'Created a reading list', 'add_to_list': 'Added to a reading list', 'follow': 'Followed'}
+        label = labels.get(self.activity_type, self.activity_type.replace('_', ' ').capitalize())
+        return f'{label} {self.comic.title}' if self.comic else label
     
     def __repr__(self):
         return f'<Activity {self.activity_type} by {self.user_id}>'
@@ -474,7 +513,7 @@ class Activity(db.Model):
             },
             'activity_type': self.activity_type,
             'is_public': self.is_public,
-            'created_at': self.created_at.isoformat()
+            'created_at': utc_isoformat(self.created_at)
         }
         if self.comic:
             data['comic'] = {
@@ -486,7 +525,7 @@ class Activity(db.Model):
             data['chapter'] = {
                 'id': self.chapter.id,
                 'title': self.chapter.title,
-                'number': self.chapter.number
+                'number': self.chapter.chapter_number
             }
         if self.target_user:
             data['target_user'] = {
@@ -512,8 +551,8 @@ class Follow(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    follower = db.relationship('User', foreign_keys=[follower_id], backref=db.backref('following', lazy=True))
-    following = db.relationship('User', foreign_keys=[following_id], backref=db.backref('followers', lazy=True))
+    follower = db.relationship('User', foreign_keys=[follower_id], backref=db.backref('following', lazy=True, cascade='all, delete-orphan'))
+    following = db.relationship('User', foreign_keys=[following_id], backref=db.backref('followers', lazy=True, cascade='all, delete-orphan'))
     
     # Unique constraint to prevent duplicate follows
     __table_args__ = (db.UniqueConstraint('follower_id', 'following_id', name='unique_follow'),)
@@ -533,9 +572,9 @@ class Bookmark(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    user = db.relationship('User', backref=db.backref('bookmarks', lazy=True))
+    user = db.relationship('User', backref=db.backref('bookmarks', lazy=True, cascade='all, delete-orphan'))
     comic = db.relationship('Comic', backref=db.backref('bookmarks', lazy=True, cascade='all, delete-orphan'))
-    chapter = db.relationship('Chapter', backref=db.backref('bookmarks', lazy=True))
+    chapter = db.relationship('Chapter', backref=db.backref('bookmarks', lazy=True, cascade='all, delete-orphan'))
     
     # Unique constraint to prevent duplicate bookmarks at same position
     __table_args__ = (db.UniqueConstraint('user_id', 'comic_id', 'chapter_id', 'page_number', name='unique_bookmark'),)
@@ -551,10 +590,10 @@ class Bookmark(db.Model):
             'chapter_id': self.chapter_id,
             'page_number': self.page_number,
             'note': self.note,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_at': utc_isoformat(self.created_at) if self.created_at else None,
             'comic_title': self.comic.title if self.comic else None,
             'chapter_title': self.chapter.title if self.chapter else None,
-            'chapter_number': self.chapter.number if self.chapter else None
+            'chapter_number': self.chapter.chapter_number if self.chapter else None
         }
 
 
@@ -571,6 +610,7 @@ class ReadingProgress(db.Model):
     total_time_spent = db.Column(db.Integer, nullable=False, default=0)  # in seconds
     completed = db.Column(db.Boolean, nullable=False, default=False)
     completed_at = db.Column(db.DateTime, nullable=True)
+    chapter = db.relationship('Chapter', backref=db.backref('reading_progress', lazy=True, cascade='all, delete-orphan'))
     
     # Relationships are defined on parent models (User, Comic, Chapter) with backrefs
     
@@ -589,30 +629,22 @@ class ReadingProgress(db.Model):
             'page_number': self.page_number,
             'total_pages': self.total_pages,
             'percent_complete': self.percent_complete,
-            'last_read_at': self.last_read_at.isoformat() if self.last_read_at else None,
+            'last_read_at': utc_isoformat(self.last_read_at) if self.last_read_at else None,
             'total_time_spent': self.total_time_spent,
             'completed': self.completed,
             'comic_title': self.comic.title if self.comic else None,
             'comic_cover': self.comic.cover_image if self.comic else None,
             'chapter_title': self.chapter.title if self.chapter else None,
-            'chapter_number': self.chapter.number if self.chapter else None
+            'chapter_number': self.chapter.chapter_number if self.chapter else None
         }
     
     def update_progress(self, page_number, total_pages, time_spent=0):
         """Update reading progress"""
         self.page_number = page_number
-        self.total_pages = max(total_pages, 1)
-        self.percent_complete = min(100.0, (page_number / self.total_pages) * 100)
+        self.total_pages = max(total_pages or 0, 0)
         self.last_read_at = datetime.utcnow()
-        self.total_time_spent += time_spent
-        
-        if self.percent_complete >= 95:
-            self.completed = True
-            if not self.completed_at:
-                self.completed_at = datetime.utcnow()
-        else:
-            self.completed = False
-            self.completed_at = None
+        self.total_time_spent = (self.total_time_spent or 0) + time_spent
+        self.update_percentage()
 
     @property
     def current_page(self):
@@ -645,7 +677,7 @@ class ReadingProgress(db.Model):
     def update_percentage(self):
         """Calculate percentage and update completion status"""
         if self.total_pages and self.total_pages > 0:
-            self.percent_complete = min(100.0, (self.page_number / self.total_pages) * 100)
+            self.percent_complete = max(0.0, min(100.0, (self.page_number / self.total_pages) * 100))
         else:
             self.percent_complete = 0.0
             

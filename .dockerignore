@@ -5,12 +5,14 @@ venv
 .venv
 env
 .env
+.env.*
 instance/
 static/uploads/
 *.db
 *.sqlite
 *.sqlite3
 debug.json
+scratch/
 .pytest_cache
 .vscode/
 .idea/

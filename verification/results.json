@@ -1,0 +1,35 @@
+{
+  "review_date": "2026-11-18",
+  "python_tests": {
+    "total": 85,
+    "passed": 84,
+    "skipped": 1,
+    "failures": 0,
+    "skip_reason": "Windows symlink creation is unavailable on this host"
+  },
+  "javascript_tests": {
+    "total": 11,
+    "passed": 11,
+    "failures": 0
+  },
+  "dependency_audit": "No known vulnerabilities found",
+  "package_consistency": "passed",
+  "syntax_check": "passed",
+  "git_whitespace_check": "passed",
+  "existing_database_unchanged": true,
+  "existing_debug_log_unchanged": true,
+  "database_sha256": "869E5868E68739B661E868E3D76E0438A7D9C536DFFFB9E1D7D3E9CABBD7B2AF",
+  "debug_log_sha256": "E02B810AB8F696BFE1F2A478428DCDFA3BF2E14E5C8DAD4A44F9F163D9C328AF",
+  "browser_checks": [
+    "sign-in",
+    "library update",
+    "rating update",
+    "comment creation",
+    "two PDF pages rendered",
+    "private comic denied",
+    "CSRF-protected logout"
+  ],
+  "docker_compose_configuration": "passed",
+  "docker_build_and_runtime": "not run; Docker engine was stopped",
+  "external_hosting_and_ai_calls": "mocked"
+}

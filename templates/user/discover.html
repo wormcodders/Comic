@@ -656,7 +656,7 @@ async function toggleLibrary(comicId, btn) {
         showToast('Error updating library', 'error');
     }
     {% else %}
-    window.location.href = '{{ url_for("auth.login") }}';
+    window.location.href = '{{ url_for("main.login") }}';
     {% endif %}
 }
 

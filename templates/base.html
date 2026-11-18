@@ -11,34 +11,7 @@
     <!-- SEO Meta Tags -->
     <title>{% block title %}ComicVault - Read Your Favorite Comics{% endblock %}</title>
     
-    <!-- CSRF Fetch Interceptor -->
-    <script>
-        (function() {
-            function getCsrfToken() {
-                const meta = document.querySelector('meta[name="csrf-token"]');
-                return meta ? meta.getAttribute('content') : '';
-            }
-            const originalFetch = window.fetch;
-            window.fetch = function(resource, config) {
-                config = config || {};
-                const method = (config.method || 'GET').toUpperCase();
-                if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
-                    const csrfToken = getCsrfToken();
-                    if (csrfToken) {
-                        if (config.headers instanceof Headers) {
-                            config.headers.set('X-CSRFToken', csrfToken);
-                        } else if (Array.isArray(config.headers)) {
-                            config.headers.push(['X-CSRFToken', csrfToken]);
-                        } else {
-                            config.headers = config.headers || {};
-                            config.headers['X-CSRFToken'] = csrfToken;
-                        }
-                    }
-                }
-                return originalFetch(resource, config);
-            };
-        })();
-    </script>
+    <script src="{{ url_for('static', filename='js/csrf.js') }}" defer></script>
     <meta name="description" content="{% block meta_description %}ComicVault - Your ultimate destination for reading comics online. Discover thousands of comics, manga, and graphic novels. Free to read, anytime, anywhere.{% endblock %}">
     <meta name="keywords" content="{% block meta_keywords %}comics, manga, graphic novels, read comics online, free comics, comic reader, digital comics{% endblock %}">
     <meta name="author" content="ComicVault">
@@ -173,7 +146,7 @@
                                     <li role="none"><a class="dropdown-item glass-dropdown-item" href="{{ url_for('main.admin_dashboard') }}" role="menuitem">Admin</a></li>
                                 {% endif %}
                                 <li role="separator" class="glass-divider" aria-hidden="true"></li>
-                                <li role="none"><a class="dropdown-item text-danger" href="{{ url_for('main.logout') }}" role="menuitem">Logout</a></li>
+                                <li role="none"><form method="post" action="{{ url_for('main.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="dropdown-item text-danger" role="menuitem">Logout</button></form></li>
                             </ul>
                         </li>
                     {% else %}
@@ -281,7 +254,7 @@
     <script>
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function() {
-            navigator.serviceWorker.register('{{ url_for('static', filename='js/sw.js') }}')
+            navigator.serviceWorker.register('{{ url_for('static', filename='js/sw.js') }}', { scope: '/' })
                 .then(function(registration) {
                     console.log('ServiceWorker registration successful');
                 })

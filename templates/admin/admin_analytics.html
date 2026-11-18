@@ -286,10 +286,10 @@ const chartOptions = {
 };
 
 // Load JSON data safely
-const chartDataUser = {{ chart_data_user | safe }};
-const chartDataCategory = {{ chart_data_category | safe }};
-const chartDataReading = {{ chart_data_reading | safe }};
-const chartDataRating = {{ chart_data_rating | safe }};
+const chartDataUser = {{ chart_data_user | tojson }};
+const chartDataCategory = {{ chart_data_category | tojson }};
+const chartDataReading = {{ chart_data_reading | tojson }};
+const chartDataRating = {{ chart_data_rating | tojson }};
 
 // User Growth Chart
 const userGrowthCtx = document.getElementById('userGrowthChart').getContext('2d');
